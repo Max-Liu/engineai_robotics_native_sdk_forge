@@ -1,6 +1,7 @@
 <mujoco model="engineai_robotics">
     <compiler angle="radian" discardvisual="false" autolimits="true" eulerseq="zyx"/>
-    <option timestep="0.002" tolerance="1e-10"/>
+    <option timestep="0.002" integrator="implicitfast" tolerance="1e-10"/>
+
     <default>
         <default class="biped">
             <default class="collision">

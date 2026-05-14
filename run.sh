@@ -3,13 +3,22 @@
 # Exits on error
 set -e
 
-# sudo chmod 666 /dev/ttyACM0
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
 # Gets the source directory
 readonly source_dir=$(cd $(dirname $0) && pwd)
 readonly symbol_dir=""
 readonly report_dir="/tmp/crashpad/report"
 readonly dmpfile_dir="/tmp/crashpad/coredump/pending"
+
+if pgrep -f src_executor > /dev/null; then
+    echo -e "${RED}⚠️ WARNING: ⚠️${NC}"
+    echo -e "${YELLOW}The src_executor process is currently running.${NC}"
+    echo -e ${YELLOW}PID: $(pgrep -f src_executor)${NC}
+    exit 1
+fi
 
 echo "[INFO] Exports the environment variables:"
 cd $source_dir

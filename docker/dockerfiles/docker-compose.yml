@@ -14,6 +14,7 @@ services:
     working_dir: ${WORKSPACE_DIR}
     privileged: true
     network_mode: host
+    pid: host
     volumes:
       - "/home/${USER_NAME}/.Xauthority:/home/${USER_NAME}/.Xauthority"
       - "/home/${USER_NAME}/.ssh:/home/${USER_NAME}/.ssh"
