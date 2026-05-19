@@ -1,30 +1,42 @@
 policy_file: "rl_stamp_tracking/policies/policy.mnn"
-time_step_total: 119
+time_step_total: 233
 
 joint_names:
   [
     "J00_HIP_PITCH_L",
     "J06_HIP_PITCH_R",
+
     "J12_WAIST_YAW",
+
     "J01_HIP_ROLL_L",
     "J07_HIP_ROLL_R",
+
     "J13_SHOULDER_PITCH_L",
     "J18_SHOULDER_PITCH_R",
+
     "J23_HEAD_YAW",
+
     "J02_HIP_YAW_L",
     "J08_HIP_YAW_R",
+
     "J14_SHOULDER_ROLL_L",
     "J19_SHOULDER_ROLL_R",
+
     "J03_KNEE_PITCH_L",
     "J09_KNEE_PITCH_R",
+
     "J15_SHOULDER_YAW_L",
     "J20_SHOULDER_YAW_R",
+
     "J04_ANKLE_PITCH_L",
     "J10_ANKLE_PITCH_R",
+
     "J16_ELBOW_PITCH_L",
     "J21_ELBOW_PITCH_R",
+
     "J05_ANKLE_ROLL_L",
     "J11_ANKLE_ROLL_R",
+
     "J17_ELBOW_YAW_L",
     "J22_ELBOW_YAW_R",
   ]
@@ -85,32 +97,46 @@ joint_damping:
     1.6838936805725098,
   ]
 
+
+
 default_joint_pos:
   [
-    -0.05999999865889549,
-    -0.05999999865889549,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.15000000596046448,
-    -0.15000000596046448,
-    0.11999999731779099,
-    0.11999999731779099,
-    0.0,
-    0.0,
-    -0.05999999865889549,
-    -0.05999999865889549,
-    -0.25,
-    -0.25,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
+    -0.06, #    "J00_HIP_PITCH_L",
+    -0.06, # "J06_HIP_PITCH_R",
+
+    0.0, # "J12_WAIST_YAW",
+
+    0.0, #"J01_HIP_ROLL_L",
+    0.0, # "J07_HIP_ROLL_R",
+
+    0.0, # "J13_SHOULDER_PITCH_L",
+    0.0, # "J18_SHOULDER_PITCH_R",
+
+    0.0, # "J23_HEAD_YAW",
+
+    0.0, # "J02_HIP_YAW_L",
+    0.0, # "J08_HIP_YAW_R",
+
+    0.15, # "J14_SHOULDER_ROLL_L",
+    -0.15, # "J19_SHOULDER_ROLL_R",
+
+    0.12, # "J03_KNEE_PITCH_L",
+    0.12, # "J09_KNEE_PITCH_R",
+
+    0, # "J15_SHOULDER_YAW_L",
+    0, # "J20_SHOULDER_YAW_R",
+
+    -0.06, # "J04_ANKLE_PITCH_L",
+    -0.06, # "J10_ANKLE_PITCH_R",
+
+    -0.25, # "J16_ELBOW_PITCH_L",
+    -0.25, # "J21_ELBOW_PITCH_R",
+
+    0.0, # "J05_ANKLE_ROLL_L",
+    0.0, # "J11_ANKLE_ROLL_R",
+
+    0, # "J17_ELBOW_YAW_L",
+    0, # "J22_ELBOW_YAW_R",
   ]
 
 action_scale:
@@ -156,7 +182,7 @@ observation_names:
   ]
 observation_history_lengths: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
 
-transition_duration_s: 0.0
+transition_duration_s: 0
 loop_motion: false
 reset_observation_history_on_loop: false
 auto_transition: true

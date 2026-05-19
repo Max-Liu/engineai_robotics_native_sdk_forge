@@ -70,7 +70,7 @@ tasks:
   key: [ RB, B ]
 
 - motion: stamp
-  period: 0.0333333333
+  period: 0.02
   runner:
   - name: rl_stamp_tracking_runner
     enabled: true
@@ -86,7 +86,7 @@ tasks:
   key: [ RB, A ]
 
 - motion: power_shot
-  period: 0.0333333333
+  period: 0.02
   runner:
   - name: rl_power_shot_tracking_runner
     enabled: true
@@ -102,7 +102,7 @@ tasks:
   key: [ RB, X ]
 
 - motion: bilidance
-  period: 0.0333333333
+  period: 0.02
   runner:
   - name: rl_bilidance_tracking_runner
     enabled: true
