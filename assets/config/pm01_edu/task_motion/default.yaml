@@ -33,6 +33,7 @@ tasks:
   manual_transition:
   - passive
   - walk
+  - rl_lab 
   - dance
   key: [ LB, A ]
 
@@ -45,8 +46,21 @@ tasks:
   manual_transition:
   - passive
   - pd_stand
+  - rl_lab 
   - dance
   key: [ LB, B ]
+
+- motion: rl_lab
+  period: 0.01
+  runner:
+  - name: rl_lab_runner
+    enabled: true
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  key: [ LB, X ]
 
 - motion: dance
   period: 0.02
@@ -57,5 +71,6 @@ tasks:
   - passive
   - pd_stand
   - walk
+  - walk_waist
   auto_transition: walk
   key: [ RB, B ]

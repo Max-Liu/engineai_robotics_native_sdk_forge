@@ -20,7 +20,8 @@ class RlWalkingExampleParam : public BasicParam {
         Eigen::Vector3d::Constant(observation_scale_angular_vel),  // base angular velocity
         Eigen::Vector3d::Constant(observation_scale_quat);         // base euler angle xyz
     command_obs_scale = Eigen::VectorXd::Zero(3);
-    command_obs_scale << Eigen::Vector2d::Constant(observation_scale_linear_vel), observation_scale_angular_vel;
+    command_obs_scale << Eigen::Vector2d::Constant(observation_scale_linear_vel),
+        observation_scale_angular_vel;
   };
 
   DEFINE_PARAM_SCOPE(scope_);
