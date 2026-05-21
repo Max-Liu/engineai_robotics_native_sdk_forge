@@ -49,6 +49,8 @@ mode:
       scope: rl_stamp_tracking/default
     - tag: rl_power_shot_tracking
       scope: rl_power_shot_tracking/default
+    - tag: rl_jumping_tracking
+      scope: rl_jumping_tracking/default
     - tag: rl_bilidance_tracking
       scope: rl_bilidance_tracking/default
     - tag: ros2_bridge
@@ -89,6 +91,8 @@ mode:
       scope: rl_stamp_tracking/default
     - tag: rl_power_shot_tracking
       scope: rl_power_shot_tracking/default
+    - tag: rl_jumping_tracking
+      scope: rl_jumping_tracking/default
     - tag: rl_bilidance_tracking
       scope: rl_bilidance_tracking/default
     - tag: ros2_bridge
