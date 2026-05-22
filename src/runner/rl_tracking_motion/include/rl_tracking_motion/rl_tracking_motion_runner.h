@@ -8,19 +8,16 @@
 
 #include "basic/motion_runner.h"
 #include "basic/runner_registry.h"
-#include "rl_power_shot_tracking_param/rl_power_shot_tracking_param.h"
+#include "rl_tracking_motion_param/rl_tracking_motion_param.h"
 
 namespace runner {
 
-class RlPowerShotTrackingRunner : public MotionRunner {
+class RlTrackingMotionRunner : public MotionRunner {
 public:
-  RlPowerShotTrackingRunner(
-      std::string_view name,
-      const std::shared_ptr<data::DataStore> &data_store)
-      : MotionRunner(name, data_store) {
-    param_ = data::ParamManager::create<data::RlPowerShotTrackingParam>();
-  }
-  ~RlPowerShotTrackingRunner() override;
+  RlTrackingMotionRunner(std::string_view name,
+                         const std::shared_ptr<data::DataStore> &data_store)
+      : MotionRunner(name, data_store) {}
+  ~RlTrackingMotionRunner() override;
 
   bool Enter() override;
   void Run() override;
@@ -59,7 +56,7 @@ private:
   void AdvanceTimeStep();
   data::LinkInfo GetRobotAnchorState() const;
 
-  std::shared_ptr<data::RlPowerShotTrackingParam> param_;
+  std::shared_ptr<data::RlTrackingMotionParam> param_;
   std::unique_ptr<TrackingPolicyModel> policy_;
 
   Eigen::VectorXi policy2deploy_joint_idx_;
@@ -92,5 +89,4 @@ private:
 
 } // namespace runner
 
-REGISTER_RUNNER(RlPowerShotTrackingRunner, "rl_power_shot_tracking_runner",
-                kMotion)
+REGISTER_RUNNER(RlTrackingMotionRunner, "rl_tracking_motion_runner", kMotion)

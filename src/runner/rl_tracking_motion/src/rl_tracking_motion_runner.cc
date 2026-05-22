@@ -1,4 +1,4 @@
-#include "rl_stamp_tracking/rl_stamp_tracking_runner.h"
+#include "rl_tracking_motion/rl_tracking_motion_runner.h"
 
 #include <MNN/ErrorCode.hpp>
 #include <MNN/Interpreter.hpp>
@@ -145,7 +145,7 @@ Eigen::VectorXf BuildMotionPhase(int time_step, int time_step_total) {
 
 } // namespace
 
-struct RlStampTrackingRunner::ReferenceState {
+struct RlTrackingMotionRunner::ReferenceState {
   Eigen::VectorXf joint_pos;
   Eigen::VectorXf joint_vel;
   Eigen::MatrixXf body_pos_w;
@@ -154,12 +154,12 @@ struct RlStampTrackingRunner::ReferenceState {
   Eigen::MatrixXf body_ang_vel_w;
 };
 
-class RlStampTrackingRunner::TrackingPolicyModel {
+class RlTrackingMotionRunner::TrackingPolicyModel {
 public:
   TrackingPolicyModel(const std::string &model_path, int obs_dim,
                       int num_actions) {
     if (!std::filesystem::exists(model_path)) {
-      throw std::runtime_error("Stamp policy file does not exist: " +
+      throw std::runtime_error("RL tracking policy file does not exist: " +
                                model_path);
     }
 
@@ -251,20 +251,23 @@ private:
   MNN::Tensor *body_ang_vel_w_tensor_ = nullptr;
 };
 
-RlStampTrackingRunner::~RlStampTrackingRunner() = default;
+RlTrackingMotionRunner::~RlTrackingMotionRunner() = default;
 
-void RlStampTrackingRunner::SetupContext() {
+void RlTrackingMotionRunner::SetupContext() {
   data_store_->parallel_by_classic_parser.store(false);
 }
 
-void RlStampTrackingRunner::TeardownContext() {}
+void RlTrackingMotionRunner::TeardownContext() {}
 
-bool RlStampTrackingRunner::Enter() {
-  if (!param_tag_.empty()) {
-    param_ = data::ParamManager::create<data::RlStampTrackingParam>(param_tag_);
+bool RlTrackingMotionRunner::Enter() {
+  if (param_tag_.empty()) {
+    LOG(ERROR) << "[RlTrackingMotionRunner::Enter] param_tag is required";
+    return false;
   }
+
+  param_ = data::ParamManager::create<data::RlTrackingMotionParam>(param_tag_);
   if (!param_) {
-    LOG(ERROR) << "[RlStampTrackingRunner::Enter] Failed to load parameters";
+    LOG(ERROR) << "[RlTrackingMotionRunner::Enter] Failed to load parameters";
     return false;
   }
   param_->num_actions = static_cast<int>(param_->joint_names.size());
@@ -298,19 +301,21 @@ bool RlStampTrackingRunner::Enter() {
     finished_ = false;
     policy_started_ = false;
   } catch (const std::exception &error) {
-    LOG(ERROR) << "[RlStampTrackingRunner::Enter] " << error.what();
+    LOG(ERROR) << "[RlTrackingMotionRunner::Enter] " << error.what();
     return false;
   }
 
-  LOG(INFO) << "[RlStampTrackingRunner::Enter] Loaded Stamp policy, obs_dim="
-            << zero_observation_.size() << ", actions=" << param_->num_actions
+  LOG(INFO) << "[RlTrackingMotionRunner::Enter] Loaded RL tracking policy, "
+            << "param_tag=" << param_tag_
+            << ", obs_dim=" << zero_observation_.size()
+            << ", actions=" << param_->num_actions
             << ", time_step_total=" << param_->time_step_total;
   return true;
 }
 
-void RlStampTrackingRunner::Run() {
+void RlTrackingMotionRunner::Run() {
   if (!policy_) {
-    LOG(ERROR) << "[RlStampTrackingRunner::Run] Policy is not loaded";
+    LOG(ERROR) << "[RlTrackingMotionRunner::Run] Policy is not loaded";
     return;
   }
 
@@ -330,7 +335,7 @@ void RlStampTrackingRunner::Run() {
     Eigen::VectorXf obs = BuildObservation(reference);
     Eigen::VectorXf action = policy_->RunAction(obs, time_step_);
     if (iter_ < 5 || iter_ % 50 == 0) {
-      LOG(INFO) << "[DEBUG-STAMP] iter=" << iter_
+      LOG(INFO) << "[DEBUG-RL-TRACKING] iter=" << iter_
                 << " reference_time_step=" << time_step_
                 << " action_time_step=" << time_step_
                 << " obs_norm=" << obs.norm()
@@ -343,20 +348,20 @@ void RlStampTrackingRunner::Run() {
     last_action_policy_ = action;
     AdvanceTimeStep();
   } catch (const std::exception &error) {
-    LOG(ERROR) << "[RlStampTrackingRunner::Run] " << error.what();
+    LOG(ERROR) << "[RlTrackingMotionRunner::Run] " << error.what();
     SetRunnerState(RunnerState::kTryExit);
   }
 }
 
-TransitionState RlStampTrackingRunner::TryExit() {
+TransitionState RlTrackingMotionRunner::TryExit() {
   return TransitionState::kCompleted;
 }
 
-bool RlStampTrackingRunner::Exit() { return true; }
+bool RlTrackingMotionRunner::Exit() { return true; }
 
-void RlStampTrackingRunner::End() {}
+void RlTrackingMotionRunner::End() {}
 
-void RlStampTrackingRunner::InitializeJointMapping() {
+void RlTrackingMotionRunner::InitializeJointMapping() {
   const int num_actions = param_->num_actions;
   if (num_actions <= 0) {
     throw std::runtime_error("joint_names is empty");
@@ -366,14 +371,14 @@ void RlStampTrackingRunner::InitializeJointMapping() {
       param_->default_joint_pos.size() != num_actions ||
       param_->action_scale.size() != num_actions) {
     throw std::runtime_error(
-        "Stamp joint parameter vector sizes must match joint_names");
+        "RL tracking joint parameter vector sizes must match joint_names");
   }
 
   policy2deploy_joint_idx_.setZero(num_actions);
   for (int i = 0; i < num_actions; ++i) {
     const auto &joint_name = param_->joint_names.at(static_cast<size_t>(i));
     if (!model_param_->joint_id_in_total_limb.contains(joint_name)) {
-      throw std::runtime_error("Unknown SDK joint name in Stamp config: " +
+      throw std::runtime_error("Unknown SDK joint name in RL tracking config: " +
                                joint_name);
     }
     policy2deploy_joint_idx_(i) =
@@ -391,15 +396,15 @@ void RlStampTrackingRunner::InitializeJointMapping() {
   joint_kd_(policy2deploy_joint_idx_) = param_->joint_damping;
 }
 
-void RlStampTrackingRunner::InitializeObservationBuffers() {
+void RlTrackingMotionRunner::InitializeObservationBuffers() {
   if (param_->observation_names.size() != kExpectedObservationNames.size()) {
     throw std::runtime_error(
-        "Stamp observation_names must contain exactly 10 terms");
+        "RL tracking observation_names must contain exactly 10 terms");
   }
   for (size_t i = 0; i < kExpectedObservationNames.size(); ++i) {
     if (param_->observation_names[i] != kExpectedObservationNames[i]) {
       throw std::runtime_error(
-          "Unsupported Stamp observation layout at index " + std::to_string(i) +
+          "Unsupported RL tracking observation layout at index " + std::to_string(i) +
           ": expected " + std::string(kExpectedObservationNames[i]) + ", got " +
           param_->observation_names[i]);
     }
@@ -428,12 +433,12 @@ void RlStampTrackingRunner::InitializeObservationBuffers() {
     observation_histories_.push_back(std::move(history));
   }
   if (single_frame_dim != 161) {
-    throw std::runtime_error("Unexpected Stamp single-frame observation dim: " +
+    throw std::runtime_error("Unexpected RL tracking single-frame observation dim: " +
                              std::to_string(single_frame_dim));
   }
 }
 
-void RlStampTrackingRunner::InitializeReferenceAlignment() {
+void RlTrackingMotionRunner::InitializeReferenceAlignment() {
   reference_alignment_rot_.setIdentity();
   reference_alignment_quat_.setIdentity();
   reference_alignment_pos_.setZero();
@@ -467,31 +472,31 @@ void RlStampTrackingRunner::InitializeReferenceAlignment() {
       robot_anchor_pos - reference_alignment_rot_ * reference_anchor_pos;
   reference_alignment_initialized_ = true;
 
-  LOG(INFO) << "[RlStampTrackingRunner::InitializeReferenceAlignment] "
+  LOG(INFO) << "[RlTrackingMotionRunner::InitializeReferenceAlignment] "
             << "reference anchor aligned to robot anchor, translation=("
             << reference_alignment_pos_.transpose() << ")";
 }
 
-void RlStampTrackingRunner::ResetObservationBuffers() {
+void RlTrackingMotionRunner::ResetObservationBuffers() {
   for (auto &history : observation_histories_) {
     history.values.setZero();
     history.initialized = false;
   }
 }
 
-void RlStampTrackingRunner::ReadCurrentState() {
+void RlTrackingMotionRunner::ReadCurrentState() {
   data_store_->joint_info.GetState(data::JointInfoType::kPosition, q_real_);
   data_store_->joint_info.GetState(data::JointInfoType::kVelocity, qd_real_);
 }
 
-RlStampTrackingRunner::ReferenceState
-RlStampTrackingRunner::SampleReference(int time_step) {
+RlTrackingMotionRunner::ReferenceState
+RlTrackingMotionRunner::SampleReference(int time_step) {
   ReferenceState reference = policy_->RunReference(zero_observation_, time_step);
   ApplyReferenceAlignment(reference);
   return reference;
 }
 
-void RlStampTrackingRunner::ApplyReferenceAlignment(
+void RlTrackingMotionRunner::ApplyReferenceAlignment(
     ReferenceState &reference) const {
   if (!reference_alignment_initialized_) {
     return;
@@ -522,7 +527,7 @@ void RlStampTrackingRunner::ApplyReferenceAlignment(
 }
 
 Eigen::VectorXf
-RlStampTrackingRunner::BuildObservation(const ReferenceState &reference) {
+RlTrackingMotionRunner::BuildObservation(const ReferenceState &reference) {
   const data::LinkInfo base = GetRobotAnchorState();
   Eigen::Quaterniond robot_anchor_quat =
       base.frame.pose.quaternion.normalized();
@@ -558,7 +563,7 @@ RlStampTrackingRunner::BuildObservation(const ReferenceState &reference) {
       (-robot_anchor_rot.transpose() * Eigen::Vector3d::UnitZ()).cast<float>();
 
   if (iter_ < 5 || iter_ % 50 == 0) {
-    LOG(INFO) << "[DEBUG-STAMP] iter=" << iter_
+    LOG(INFO) << "[DEBUG-RL-TRACKING] iter=" << iter_
               << " robot_anchor_pos=(" << robot_anchor_pos.transpose() << ")"
               << " reference_anchor_pos=(" << reference_anchor_pos.transpose()
               << ") motion_anchor_pos_b=(" << motion_anchor_pos_b.transpose()
@@ -600,7 +605,7 @@ RlStampTrackingRunner::BuildObservation(const ReferenceState &reference) {
 }
 
 Eigen::VectorXf
-RlStampTrackingRunner::ProcessObservationTerm(size_t term_index,
+RlTrackingMotionRunner::ProcessObservationTerm(size_t term_index,
                                               const Eigen::VectorXf &value) {
   if (term_index >= observation_histories_.size()) {
     throw std::runtime_error("Observation term index out of range");
@@ -631,7 +636,7 @@ RlStampTrackingRunner::ProcessObservationTerm(size_t term_index,
   return history.values;
 }
 
-int RlStampTrackingRunner::GetObservationDim(const std::string &name) const {
+int RlTrackingMotionRunner::GetObservationDim(const std::string &name) const {
   if (name == "command")
     return 2 * param_->num_actions;
   if (name == "motion_anchor_pos_b")
@@ -655,7 +660,7 @@ int RlStampTrackingRunner::GetObservationDim(const std::string &name) const {
   return 0;
 }
 
-int RlStampTrackingRunner::ComputeObservationDim() const {
+int RlTrackingMotionRunner::ComputeObservationDim() const {
   int dim = 0;
   for (size_t i = 0; i < param_->observation_names.size(); ++i) {
     dim += GetObservationDim(param_->observation_names[i]) *
@@ -664,7 +669,7 @@ int RlStampTrackingRunner::ComputeObservationDim() const {
   return dim;
 }
 
-void RlStampTrackingRunner::CalculateWarmupMotorCommand(
+void RlTrackingMotionRunner::CalculateWarmupMotorCommand(
     const ReferenceState &reference) {
   Eigen::VectorXd target_policy = reference.joint_pos.cast<double>();
   q_des_ = q_real_;
@@ -676,17 +681,17 @@ void RlStampTrackingRunner::CalculateWarmupMotorCommand(
   q_des_ = alpha * q_des_ + (1.0 - alpha) * q_enter_;
 
   if (iter_ < 5 || iter_ % 50 == 0) {
-    LOG(INFO) << "[DEBUG-STAMP] warmup iter=" << iter_
+    LOG(INFO) << "[DEBUG-RL-TRACKING] warmup iter=" << iter_
               << " alpha=" << alpha
               << " target_ref_min=" << target_policy.minCoeff()
               << " target_ref_max=" << target_policy.maxCoeff();
   }
 }
 
-void RlStampTrackingRunner::CalculateMotorCommand(
+void RlTrackingMotionRunner::CalculateMotorCommand(
     const Eigen::VectorXf &action) {
   if (action.size() != param_->num_actions) {
-    throw std::runtime_error("Stamp policy action size mismatch");
+    throw std::runtime_error("RL tracking policy action size mismatch");
   }
 
   Eigen::VectorXd target_policy =
@@ -704,14 +709,14 @@ void RlStampTrackingRunner::CalculateMotorCommand(
   }
 }
 
-void RlStampTrackingRunner::SendMotorCommand() {
+void RlTrackingMotionRunner::SendMotorCommand() {
   qd_des_ = Eigen::VectorXd::Zero(model_param_->num_total_joints);
   tau_ff_des_ = Eigen::VectorXd::Zero(model_param_->num_total_joints);
   GetMutableOutput().SetCommand(q_des_, qd_des_, joint_kp_, joint_kd_,
                                 tau_ff_des_);
 }
 
-void RlStampTrackingRunner::AdvanceTimeStep() {
+void RlTrackingMotionRunner::AdvanceTimeStep() {
   ++iter_;
 
   if (param_->time_step_total <= 0) {
@@ -742,7 +747,7 @@ void RlStampTrackingRunner::AdvanceTimeStep() {
   }
 }
 
-data::LinkInfo RlStampTrackingRunner::GetRobotAnchorState() const {
+data::LinkInfo RlTrackingMotionRunner::GetRobotAnchorState() const {
   data::LinkInfo simulated_base =
       *data_store_->simulated_base_state_in_world.Get();
   if (LinkStateLooksInitialized(simulated_base)) {

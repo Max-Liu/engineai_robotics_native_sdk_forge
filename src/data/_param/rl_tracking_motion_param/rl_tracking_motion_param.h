@@ -8,10 +8,9 @@
 
 namespace data {
 
-class RlPowerShotTrackingParam : public BasicParam {
+class RlTrackingMotionParam : public BasicParam {
 public:
-  RlPowerShotTrackingParam(std::string_view tag = "rl_power_shot_tracking")
-      : BasicParam(tag) {
+  explicit RlTrackingMotionParam(std::string_view tag) : BasicParam(tag) {
     num_actions = static_cast<int>(joint_names.size());
   }
 

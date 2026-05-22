@@ -1,5 +1,5 @@
 policy_file: "rl_jumping_tracking/policies/policy.mnn"
-time_step_total: 205
+time_step_total: 208
 
 joint_names:
   [
@@ -182,7 +182,7 @@ observation_names:
   ]
 observation_history_lengths: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
 
-transition_duration_s: 0.5
+transition_duration_s: 0.3
 loop_motion: false
 reset_observation_history_on_loop: false
 auto_transition: true

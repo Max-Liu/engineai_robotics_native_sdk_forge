@@ -75,7 +75,7 @@ tasks:
 - motion: stamp
   period: 0.02
   runner:
-  - name: rl_stamp_tracking_runner
+  - name: rl_tracking_motion_runner
     enabled: true
     param_tag: rl_stamp_tracking
   manual_transition:
@@ -92,7 +92,7 @@ tasks:
 - motion: power_shot
   period: 0.02
   runner:
-  - name: rl_power_shot_tracking_runner
+  - name: rl_tracking_motion_runner
     enabled: true
     param_tag: rl_power_shot_tracking
   manual_transition:
@@ -109,7 +109,7 @@ tasks:
 - motion: jumping
   period: 0.02
   runner:
-  - name: rl_jumping_tracking_runner
+  - name: rl_tracking_motion_runner
     enabled: true
     param_tag: rl_jumping_tracking
   manual_transition:
@@ -126,7 +126,7 @@ tasks:
 - motion: bilidance
   period: 0.02
   runner:
-  - name: rl_bilidance_tracking_runner
+  - name: rl_tracking_motion_runner
     enabled: true
     param_tag: rl_bilidance_tracking
   manual_transition:
