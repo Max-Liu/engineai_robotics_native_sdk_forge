@@ -36,6 +36,7 @@ tasks:
   - dance
   - stamp
   - power_shot
+  - kick
   - jumping
   - bilidance
   key: [ LB, A ]
@@ -52,6 +53,7 @@ tasks:
   - dance
   - stamp
   - power_shot
+  - kick
   - jumping
   - bilidance
   key: [ LB, B ]
@@ -67,6 +69,7 @@ tasks:
   - walk
   - stamp
   - power_shot
+  - kick
   - jumping
   - bilidance
   auto_transition: walk
@@ -84,6 +87,7 @@ tasks:
   - walk
   - dance
   - power_shot
+  - kick
   - jumping
   - bilidance
   auto_transition: walk
@@ -101,10 +105,29 @@ tasks:
   - walk
   - dance
   - stamp
+  - kick
   - jumping
   - bilidance
   auto_transition: walk
   key: [ RB, X ]
+
+- motion: kick
+  period: 0.02
+  runner:
+  - name: rl_tracking_motion_runner
+    enabled: true
+    param_tag: kick
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  - stamp
+  - power_shot
+  - jumping
+  - bilidance
+  auto_transition: walk
+  key: [ LB, X ]
 
 - motion: jumping
   period: 0.02
@@ -119,6 +142,7 @@ tasks:
   - dance
   - stamp
   - power_shot
+  - kick
   - bilidance
   auto_transition: walk
   key: [ LB, Y ]
@@ -136,6 +160,7 @@ tasks:
   - dance
   - stamp
   - power_shot
+  - kick
   - jumping
   auto_transition: walk
   key: [ RB, Y ]
