@@ -8,6 +8,7 @@
 
 #include "basic/motion_runner.h"
 #include "basic/runner_registry.h"
+#include "rl_tracking_motion/policy_io_mcap_logger.h"
 #include "rl_tracking_motion_param/rl_tracking_motion_param.h"
 
 namespace runner {
@@ -28,7 +29,6 @@ public:
   void TeardownContext() override;
 
 private:
-  struct ReferenceState;
   class TrackingPolicyModel;
 
   struct ObservationHistory {
@@ -43,21 +43,28 @@ private:
   void InitializeReferenceAlignment();
   void ResetObservationBuffers();
   void ReadCurrentState();
-  ReferenceState SampleReference(int time_step);
-  void ApplyReferenceAlignment(ReferenceState &reference) const;
-  Eigen::VectorXf BuildObservation(const ReferenceState &reference);
+  PolicyOutputs SampleReference(int time_step);
+  void ApplyReferenceAlignment(PolicyOutputs &reference) const;
+  Eigen::VectorXf BuildObservation(const PolicyOutputs &reference);
   Eigen::VectorXf ProcessObservationTerm(size_t term_index,
                                          const Eigen::VectorXf &value);
   int GetObservationDim(const std::string &name) const;
   int ComputeObservationDim() const;
-  void CalculateWarmupMotorCommand(const ReferenceState &reference);
+  void CalculateWarmupMotorCommand(const PolicyOutputs &reference);
   void CalculateMotorCommand(const Eigen::VectorXf &action);
   void SendMotorCommand();
   void AdvanceTimeStep();
   data::LinkInfo GetRobotAnchorState() const;
+  PolicyIoMcapLoggerConfig BuildPolicyIoMcapLoggerConfig() const;
+  void LogReferencePolicyIo(const Eigen::VectorXf &obs, int time_step,
+                            const PolicyOutputs &outputs);
+  void LogActionPolicyIo(const Eigen::VectorXf &obs, int time_step,
+                         const PolicyOutputs &outputs);
+  void LogJointCommandFeedback();
 
   std::shared_ptr<data::RlTrackingMotionParam> param_;
   std::unique_ptr<TrackingPolicyModel> policy_;
+  std::unique_ptr<PolicyIoMcapLogger> policy_io_logger_;
 
   Eigen::VectorXi policy2deploy_joint_idx_;
   Eigen::VectorXd default_joint_q_;

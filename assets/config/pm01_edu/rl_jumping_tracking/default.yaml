@@ -1,4 +1,6 @@
 policy_file: "rl_jumping_tracking/policies/policy.mnn"
+policy_io_mcap_enabled: true
+policy_io_mcap_dir: "logs"
 time_step_total: 208
 
 joint_names:

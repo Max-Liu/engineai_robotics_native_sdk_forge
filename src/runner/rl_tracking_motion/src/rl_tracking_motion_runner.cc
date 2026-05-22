@@ -8,6 +8,7 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
+#include <utility>
 
 #include <glog/logging.h>
 
@@ -145,15 +146,6 @@ Eigen::VectorXf BuildMotionPhase(int time_step, int time_step_total) {
 
 } // namespace
 
-struct RlTrackingMotionRunner::ReferenceState {
-  Eigen::VectorXf joint_pos;
-  Eigen::VectorXf joint_vel;
-  Eigen::MatrixXf body_pos_w;
-  Eigen::MatrixXf body_quat_w;
-  Eigen::MatrixXf body_lin_vel_w;
-  Eigen::MatrixXf body_ang_vel_w;
-};
-
 class RlTrackingMotionRunner::TrackingPolicyModel {
 public:
   TrackingPolicyModel(const std::string &model_path, int obs_dim,
@@ -199,33 +191,16 @@ public:
     ValidateTensorSize(body_ang_vel_w_tensor_, 9, "body_ang_vel_w");
   }
 
-  Eigen::VectorXf RunAction(const Eigen::VectorXf &obs, int time_step) {
-    RunSession(obs, time_step);
-    return CopyTensorToVector(actions_tensor_, "actions");
+  PolicyOutputs RunAction(const Eigen::VectorXf &obs, int time_step) {
+    return RunSession(obs, time_step);
   }
 
-  ReferenceState RunReference(const Eigen::VectorXf &zero_obs, int time_step) {
-    RunSession(zero_obs, time_step);
-    ReferenceState reference;
-    reference.joint_pos = CopyTensorToVector(joint_pos_tensor_, "joint_pos");
-    reference.joint_vel = CopyTensorToVector(joint_vel_tensor_, "joint_vel");
-    reference.body_pos_w = VectorToRowMajorMatrix(
-        CopyTensorToVector(body_pos_w_tensor_, "body_pos_w"), 3, 3,
-        "body_pos_w");
-    reference.body_quat_w = VectorToRowMajorMatrix(
-        CopyTensorToVector(body_quat_w_tensor_, "body_quat_w"), 3, 4,
-        "body_quat_w");
-    reference.body_lin_vel_w = VectorToRowMajorMatrix(
-        CopyTensorToVector(body_lin_vel_w_tensor_, "body_lin_vel_w"), 3, 3,
-        "body_lin_vel_w");
-    reference.body_ang_vel_w = VectorToRowMajorMatrix(
-        CopyTensorToVector(body_ang_vel_w_tensor_, "body_ang_vel_w"), 3, 3,
-        "body_ang_vel_w");
-    return reference;
+  PolicyOutputs RunReference(const Eigen::VectorXf &zero_obs, int time_step) {
+    return RunSession(zero_obs, time_step);
   }
 
 private:
-  void RunSession(const Eigen::VectorXf &obs, int time_step) {
+  PolicyOutputs RunSession(const Eigen::VectorXf &obs, int time_step) {
     Eigen::VectorXf time_step_value(1);
     time_step_value(0) = static_cast<float>(time_step);
     CopyVectorToTensor(obs_tensor_, obs, "obs");
@@ -236,6 +211,24 @@ private:
       throw std::runtime_error("MNN runSession failed, error code: " +
                                std::to_string(static_cast<int>(code)));
     }
+
+    PolicyOutputs outputs;
+    outputs.actions = CopyTensorToVector(actions_tensor_, "actions");
+    outputs.joint_pos = CopyTensorToVector(joint_pos_tensor_, "joint_pos");
+    outputs.joint_vel = CopyTensorToVector(joint_vel_tensor_, "joint_vel");
+    outputs.body_pos_w = VectorToRowMajorMatrix(
+        CopyTensorToVector(body_pos_w_tensor_, "body_pos_w"), 3, 3,
+        "body_pos_w");
+    outputs.body_quat_w = VectorToRowMajorMatrix(
+        CopyTensorToVector(body_quat_w_tensor_, "body_quat_w"), 3, 4,
+        "body_quat_w");
+    outputs.body_lin_vel_w = VectorToRowMajorMatrix(
+        CopyTensorToVector(body_lin_vel_w_tensor_, "body_lin_vel_w"), 3, 3,
+        "body_lin_vel_w");
+    outputs.body_ang_vel_w = VectorToRowMajorMatrix(
+        CopyTensorToVector(body_ang_vel_w_tensor_, "body_ang_vel_w"), 3, 3,
+        "body_ang_vel_w");
+    return outputs;
   }
 
   std::shared_ptr<MNN::Interpreter> net_;
@@ -251,7 +244,11 @@ private:
   MNN::Tensor *body_ang_vel_w_tensor_ = nullptr;
 };
 
-RlTrackingMotionRunner::~RlTrackingMotionRunner() = default;
+RlTrackingMotionRunner::~RlTrackingMotionRunner() {
+  if (policy_io_logger_) {
+    policy_io_logger_->Close();
+  }
+}
 
 void RlTrackingMotionRunner::SetupContext() {
   data_store_->parallel_by_classic_parser.store(false);
@@ -285,6 +282,13 @@ bool RlTrackingMotionRunner::Enter() {
         param_->policy_file);
     policy_ = std::make_unique<TrackingPolicyModel>(policy_path, obs_dim,
                                                     param_->num_actions);
+    policy_io_logger_ = std::make_unique<PolicyIoMcapLogger>();
+    policy_io_logger_->Start(BuildPolicyIoMcapLoggerConfig());
+
+    time_step_ = 0;
+    iter_ = 0;
+    finished_ = false;
+    policy_started_ = false;
 
     ReadCurrentState();
     InitializeReferenceAlignment();
@@ -295,13 +299,12 @@ bool RlTrackingMotionRunner::Enter() {
     GetMutableOutput().Reset();
     GetMutableOutput().SetCommand(q_des_, qd_des_, joint_kp_, joint_kd_,
                                   tau_ff_des_);
-
-    time_step_ = 0;
-    iter_ = 0;
-    finished_ = false;
-    policy_started_ = false;
+    LogJointCommandFeedback();
   } catch (const std::exception &error) {
     LOG(ERROR) << "[RlTrackingMotionRunner::Enter] " << error.what();
+    if (policy_io_logger_) {
+      policy_io_logger_->Close();
+    }
     return false;
   }
 
@@ -324,7 +327,7 @@ void RlTrackingMotionRunner::Run() {
 
   try {
     ReadCurrentState();
-    ReferenceState reference = SampleReference(time_step_);
+    PolicyOutputs reference = SampleReference(time_step_);
 
     if (!policy_started_) {
       ResetObservationBuffers();
@@ -333,7 +336,9 @@ void RlTrackingMotionRunner::Run() {
     }
 
     Eigen::VectorXf obs = BuildObservation(reference);
-    Eigen::VectorXf action = policy_->RunAction(obs, time_step_);
+    PolicyOutputs action_outputs = policy_->RunAction(obs, time_step_);
+    LogActionPolicyIo(obs, time_step_, action_outputs);
+    const Eigen::VectorXf &action = action_outputs.actions;
     if (iter_ < 5 || iter_ % 50 == 0) {
       LOG(INFO) << "[DEBUG-RL-TRACKING] iter=" << iter_
                 << " reference_time_step=" << time_step_
@@ -357,9 +362,18 @@ TransitionState RlTrackingMotionRunner::TryExit() {
   return TransitionState::kCompleted;
 }
 
-bool RlTrackingMotionRunner::Exit() { return true; }
+bool RlTrackingMotionRunner::Exit() {
+  if (policy_io_logger_) {
+    policy_io_logger_->Close();
+  }
+  return true;
+}
 
-void RlTrackingMotionRunner::End() {}
+void RlTrackingMotionRunner::End() {
+  if (policy_io_logger_) {
+    policy_io_logger_->Close();
+  }
+}
 
 void RlTrackingMotionRunner::InitializeJointMapping() {
   const int num_actions = param_->num_actions;
@@ -448,7 +462,8 @@ void RlTrackingMotionRunner::InitializeReferenceAlignment() {
     return;
   }
 
-  ReferenceState initial_reference = policy_->RunReference(zero_observation_, 0);
+  PolicyOutputs initial_reference = policy_->RunReference(zero_observation_, 0);
+  LogReferencePolicyIo(zero_observation_, 0, initial_reference);
   const data::LinkInfo robot_anchor = GetRobotAnchorState();
   const Eigen::Vector3f robot_anchor_pos =
       robot_anchor.frame.pose.position.cast<float>();
@@ -489,15 +504,15 @@ void RlTrackingMotionRunner::ReadCurrentState() {
   data_store_->joint_info.GetState(data::JointInfoType::kVelocity, qd_real_);
 }
 
-RlTrackingMotionRunner::ReferenceState
-RlTrackingMotionRunner::SampleReference(int time_step) {
-  ReferenceState reference = policy_->RunReference(zero_observation_, time_step);
+PolicyOutputs RlTrackingMotionRunner::SampleReference(int time_step) {
+  PolicyOutputs reference = policy_->RunReference(zero_observation_, time_step);
+  LogReferencePolicyIo(zero_observation_, time_step, reference);
   ApplyReferenceAlignment(reference);
   return reference;
 }
 
 void RlTrackingMotionRunner::ApplyReferenceAlignment(
-    ReferenceState &reference) const {
+    PolicyOutputs &reference) const {
   if (!reference_alignment_initialized_) {
     return;
   }
@@ -527,7 +542,7 @@ void RlTrackingMotionRunner::ApplyReferenceAlignment(
 }
 
 Eigen::VectorXf
-RlTrackingMotionRunner::BuildObservation(const ReferenceState &reference) {
+RlTrackingMotionRunner::BuildObservation(const PolicyOutputs &reference) {
   const data::LinkInfo base = GetRobotAnchorState();
   Eigen::Quaterniond robot_anchor_quat =
       base.frame.pose.quaternion.normalized();
@@ -669,8 +684,80 @@ int RlTrackingMotionRunner::ComputeObservationDim() const {
   return dim;
 }
 
+PolicyIoMcapLoggerConfig
+RlTrackingMotionRunner::BuildPolicyIoMcapLoggerConfig() const {
+  PolicyIoMcapLoggerConfig config;
+  config.enabled = param_->policy_io_mcap_enabled;
+  config.directory = param_->policy_io_mcap_dir;
+  config.runner = "rl_tracking_motion_runner";
+  config.param_tag = param_tag_;
+  config.policy_file = param_->policy_file;
+  config.joint_names = param_->joint_names;
+  config.command_joint_names.assign(model_param_->num_total_joints, "");
+  for (const auto &[joint_name, joint_id] :
+       model_param_->joint_id_in_total_limb) {
+    if (joint_id >= 0 && joint_id < model_param_->num_total_joints) {
+      config.command_joint_names[static_cast<size_t>(joint_id)] = joint_name;
+    }
+  }
+  config.observation_names = param_->observation_names;
+  config.observation_history_lengths = param_->observation_history_lengths;
+  config.num_actions = param_->num_actions;
+
+  int offset = 0;
+  for (size_t i = 0; i < param_->observation_names.size(); ++i) {
+    PolicyIoObservationTermLayout term;
+    term.name = param_->observation_names[i];
+    term.history_length = param_->observation_history_lengths[i];
+    term.value_dim = GetObservationDim(term.name);
+    term.flattened_dim = term.history_length * term.value_dim;
+    term.flattened_offset = offset;
+    offset += term.flattened_dim;
+    config.observation_layout.push_back(std::move(term));
+  }
+
+  return config;
+}
+
+void RlTrackingMotionRunner::LogReferencePolicyIo(
+    const Eigen::VectorXf &obs, int time_step, const PolicyOutputs &outputs) {
+  if (!policy_io_logger_) {
+    return;
+  }
+  policy_io_logger_->RecordReference(
+      PolicyIoInvocationContext{iter_, time_step_, runner_period_}, obs,
+      time_step, outputs);
+}
+
+void RlTrackingMotionRunner::LogActionPolicyIo(const Eigen::VectorXf &obs,
+                                               int time_step,
+                                               const PolicyOutputs &outputs) {
+  if (!policy_io_logger_) {
+    return;
+  }
+  policy_io_logger_->RecordAction(
+      PolicyIoInvocationContext{iter_, time_step_, runner_period_}, obs,
+      time_step, outputs);
+}
+
+void RlTrackingMotionRunner::LogJointCommandFeedback() {
+  if (!policy_io_logger_) {
+    return;
+  }
+
+  PolicyIoJointCommand command;
+  command.position = q_des_;
+  command.velocity = qd_des_;
+  command.feed_forward_torque = tau_ff_des_;
+  command.torque = Eigen::VectorXd::Zero(model_param_->num_total_joints);
+  command.stiffness = joint_kp_;
+  command.damping = joint_kd_;
+  policy_io_logger_->RecordJointCommandFeedback(
+      PolicyIoInvocationContext{iter_, time_step_, runner_period_}, command);
+}
+
 void RlTrackingMotionRunner::CalculateWarmupMotorCommand(
-    const ReferenceState &reference) {
+    const PolicyOutputs &reference) {
   Eigen::VectorXd target_policy = reference.joint_pos.cast<double>();
   q_des_ = q_real_;
   q_des_(policy2deploy_joint_idx_) = target_policy;
@@ -714,6 +801,7 @@ void RlTrackingMotionRunner::SendMotorCommand() {
   tau_ff_des_ = Eigen::VectorXd::Zero(model_param_->num_total_joints);
   GetMutableOutput().SetCommand(q_des_, qd_des_, joint_kp_, joint_kd_,
                                 tau_ff_des_);
+  LogJointCommandFeedback();
 }
 
 void RlTrackingMotionRunner::AdvanceTimeStep() {

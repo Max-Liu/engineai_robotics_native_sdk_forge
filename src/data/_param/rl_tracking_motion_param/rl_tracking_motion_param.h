@@ -17,6 +17,8 @@ public:
   DEFINE_PARAM_SCOPE(scope_);
 
   std::string LOAD_PARAM(policy_file);
+  bool LOAD_PARAM_DEFAULT(policy_io_mcap_enabled, true);
+  std::string LOAD_PARAM_DEFAULT(policy_io_mcap_dir, "logs");
   int LOAD_PARAM(time_step_total);
 
   std::vector<std::string> LOAD_PARAM(joint_names);

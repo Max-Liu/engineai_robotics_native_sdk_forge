@@ -1,4 +1,6 @@
 policy_file: "rl_power_shot_tracking/policies/policy.mnn"
+policy_io_mcap_enabled: true
+policy_io_mcap_dir: "logs"
 time_step_total: 388
 
 joint_names:

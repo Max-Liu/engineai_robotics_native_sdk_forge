@@ -14,6 +14,7 @@ If you find a problem or have an improvement, pull requests are welcome.
 - **Deployment fixes:** fixes and adjustments for issues encountered when deploying and running the SDK in real development environments.
 - **macOS gamepad support:** physical gamepads connected to macOS can be bridged into the Docker-based SDK runtime, including HID backend support for controllers such as DUALSHOCK 4.
 - **Simpler motion extension:** whole-body RL tracking motions can be added through configuration and policy files, without copying runner code or creating new per-motion C++ classes when the shared tracking interface is sufficient.
+- **Policy I/O MCAP logging:** shared RL tracking motions can record policy inputs, policy outputs, and joint command feedback to JSON-encoded MCAP files for offline debugging and comparison.
 - **Improved simulation workflow on macOS:** MuJoCo can be run in Docker with browser-based VNC viewing for systems where native container GUI display is unavailable.
 
 For the original upstream project, documentation, and baseline implementation, see:
@@ -302,13 +303,15 @@ Create:
 assets/config/<robot>/<motion_tag>/default.yaml
 ```
 
-Set `policy_file` to the policy path under that motion directory, usually:
+Set `policy_file` to the policy path under that motion directory. Add the policy I/O MCAP settings when you want explicit per-motion control:
 
 ```yaml
 policy_file: <motion_tag>/policies/policy.mnn
+policy_io_mcap_enabled: true
+policy_io_mcap_dir: logs
 ```
 
-Use the shared tracking schema:
+Use the rest of the shared tracking schema:
 
 ```yaml
 time_step_total: 0
@@ -325,6 +328,8 @@ reset_observation_history_on_loop: true
 auto_transition: true
 align_reference_to_robot_anchor: true
 ```
+
+`policy_io_mcap_enabled` and `policy_io_mcap_dir` are optional. They default to `true` and `logs`. Relative log directories are resolved under `ENGINEAI_ROBOTICS_DIR` when that environment variable is set; otherwise they are resolved under the current working directory. Use an absolute path when logs need to be written outside the SDK tree.
 
 Keep `observation_names` in the supported order:
 
@@ -388,6 +393,34 @@ After a full build, rebuild the runner with:
 ```
 
 Only add a new C++ runner module when the motion cannot use the shared tracking YAML schema.
+
+### Policy I/O MCAP Logs
+
+When `policy_io_mcap_enabled` is true, `rl_tracking_motion_runner` writes one MCAP file for each runner entry:
+
+```text
+<policy_io_mcap_dir>/rl_tracking_motion_<param_tag>_<YYYYMMDD_HHMMSS>_<pid>.mcap
+```
+
+The default `policy_io_mcap_dir: logs` writes to:
+
+```text
+$ENGINEAI_ROBOTICS_DIR/logs
+```
+
+The MCAP file uses JSON messages and includes:
+
+- `/rl_tracking_motion/policy/reference`: zero-observation reference-policy calls and outputs.
+- `/rl_tracking_motion/policy/action`: runtime observation action-policy calls and outputs.
+- `/hardware/joint_command_feedback`: commanded joint position, velocity, feed-forward torque, stiffness, and damping feedback.
+
+Metadata records include the runner name, `param_tag`, `policy_file`, joint names, command joint names, observation names, observation history lengths, flattened observation layout, output shapes, and joint command feedback shape.
+
+To disable policy I/O logging for a motion, set:
+
+```yaml
+policy_io_mcap_enabled: false
+```
 
 ## MuJoCo Simulation
 

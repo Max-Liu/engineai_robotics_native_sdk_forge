@@ -14,6 +14,7 @@
 - **部署问题修复：** 修复和调整了一些真实开发、部署、运行过程中遇到的问题。
 - **macOS 手柄支持：** 支持将连接到 macOS 的实体手柄输入桥接到 Docker 内的 SDK 运行时，并为 DUALSHOCK 4 等手柄提供 HID backend 支持。
 - **简化动作扩展：** 当新的全身 RL tracking 动作符合共享 MNN tracking 接口时，只需添加配置和策略文件，不需要复制 runner 代码或新增每个动作专属的 C++ 类。
+- **Policy I/O MCAP 日志：** 共享 RL tracking 动作可将策略输入、策略输出和关节命令反馈记录为 JSON 编码的 MCAP 文件，便于离线调试和对比。
 - **改进 macOS 仿真流程：** 在 macOS + Docker Desktop 场景下，可通过浏览器 VNC 查看 MuJoCo 仿真画面。
 
 原始上游项目、文档与基线实现请参考：
@@ -302,13 +303,15 @@ python3 tools/virtual_gamepad/virtual_gamepad.py
 assets/config/<robot>/<motion_tag>/default.yaml
 ```
 
-将 `policy_file` 指向该动作目录下的策略文件，通常为：
+将 `policy_file` 指向该动作目录下的策略文件。需要显式控制 policy I/O MCAP 日志时，添加对应配置：
 
 ```yaml
 policy_file: <motion_tag>/policies/policy.mnn
+policy_io_mcap_enabled: true
+policy_io_mcap_dir: logs
 ```
 
-使用共享 tracking schema：
+使用其余共享 tracking schema：
 
 ```yaml
 time_step_total: 0
@@ -325,6 +328,8 @@ reset_observation_history_on_loop: true
 auto_transition: true
 align_reference_to_robot_anchor: true
 ```
+
+`policy_io_mcap_enabled` 和 `policy_io_mcap_dir` 是可选字段，默认值分别为 `true` 和 `logs`。相对日志目录会优先解析到 `ENGINEAI_ROBOTICS_DIR` 下；如果该环境变量未设置，则解析到当前工作目录下。如需写入 SDK 目录外的位置，请使用绝对路径。
 
 `observation_names` 保持以下支持顺序：
 
@@ -388,6 +393,34 @@ ENGINEAI_ROBOTICS_USED_RUNNERS=rl_tracking_motion_runner ./build.sh
 ```
 
 只有当动作无法使用共享 tracking YAML schema 时，才新增 C++ runner 模块。
+
+### Policy I/O MCAP 日志
+
+当 `policy_io_mcap_enabled` 为 true 时，`rl_tracking_motion_runner` 每次进入 runner 都会写入一个 MCAP 文件：
+
+```text
+<policy_io_mcap_dir>/rl_tracking_motion_<param_tag>_<YYYYMMDD_HHMMSS>_<pid>.mcap
+```
+
+默认 `policy_io_mcap_dir: logs` 会写入：
+
+```text
+$ENGINEAI_ROBOTICS_DIR/logs
+```
+
+MCAP 文件使用 JSON 消息，包含：
+
+- `/rl_tracking_motion/policy/reference`：零观测 reference-policy 调用及输出。
+- `/rl_tracking_motion/policy/action`：运行时观测 action-policy 调用及输出。
+- `/hardware/joint_command_feedback`：下发的关节位置、速度、前馈力矩、刚度和阻尼反馈。
+
+Metadata 记录包含 runner 名称、`param_tag`、`policy_file`、关节名、命令关节名、观测名、观测历史长度、扁平化观测布局、输出 shape 和关节命令反馈 shape。
+
+如需关闭某个动作的 policy I/O 日志，设置：
+
+```yaml
+policy_io_mcap_enabled: false
+```
 
 ## MuJoCo 仿真
 

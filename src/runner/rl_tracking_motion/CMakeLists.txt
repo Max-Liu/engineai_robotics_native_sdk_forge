@@ -5,6 +5,9 @@ string(REGEX REPLACE ".*/\(.*\)" "\\1" CURRENT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 get_namespace(${CMAKE_CURRENT_SOURCE_DIR} CURRENT_TARGET_NAME)
 get_alias_namespace(${CMAKE_CURRENT_SOURCE_DIR} CURRENT_TARGET_ALIAS_NAME)
 
+find_package(mcap_vendor REQUIRED)
+find_package(nlohmann_json REQUIRED)
+
 # Set file collection
 file(GLOB_RECURSE head_files ${CMAKE_CURRENT_SOURCE_DIR}/*.h ${CMAKE_CURRENT_SOURCE_DIR}/*.hpp)
 file(GLOB_RECURSE souce_files ${CMAKE_CURRENT_SOURCE_DIR}/*.cc ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
@@ -36,6 +39,8 @@ target_link_libraries(${CURRENT_TARGET_NAME}
     glog::glog
     fmt::fmt
     Eigen3::Eigen
+    mcap_vendor::mcap
+    nlohmann_json::nlohmann_json
     src::runner::basic
     src::common::base
     ${ENGINEAI_ROBOTICS_THIRD_PARTY}/lib/libMNN.so
