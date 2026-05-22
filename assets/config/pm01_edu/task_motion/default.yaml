@@ -33,7 +33,7 @@ tasks:
   manual_transition:
   - passive
   - walk
-  - rl_lab
+  - rl_lab 
   - dance
   - stamp
   - power_shot
@@ -51,7 +51,7 @@ tasks:
   manual_transition:
   - passive
   - pd_stand
-  - rl_lab
+  - rl_lab 
   - dance
   - stamp
   - power_shot
@@ -141,7 +141,7 @@ tasks:
   - jumping
   - bilidance
   auto_transition: walk
-  key: [ LB, A ]
+  key: [ RB, Y ]
 
 - motion: jumping
   period: 0.02
@@ -177,4 +177,4 @@ tasks:
   - kick
   - jumping
   auto_transition: walk
-  key: [ RB, Y ]
+  key: [ LB, A ]

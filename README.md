@@ -1,5 +1,7 @@
 # EngineAI Robotics Native SDK Fork
 
+[中文](README_CN.md) | English
+
 This repository is a fork of the official
 [engineai-robotics/engineai_robotics_native_sdk](https://github.com/engineai-robotics/engineai_robotics_native_sdk).
 
