@@ -45,8 +45,16 @@ mode:
       scope: rl_walking_example/default
     - tag: rl_dance_example
       scope: rl_dance_example/default
-    - tag: motion_stamp
-      scope: motion_stamp/default
+    - tag: rl_stamp_tracking
+      scope: rl_stamp_tracking/default
+    - tag: rl_power_shot_tracking
+      scope: rl_power_shot_tracking/default
+    - tag: kick
+      scope: kick/default
+    - tag: rl_jumping_tracking
+      scope: rl_jumping_tracking/default
+    - tag: rl_bilidance_tracking
+      scope: rl_bilidance_tracking/default
     - tag: ros2_bridge
       scope: ros2_bridge/default
 
@@ -81,7 +89,15 @@ mode:
       scope: rl_walking_example/default
     - tag: rl_dance_example
       scope: rl_dance_example/default
-    - tag: motion_stamp
-      scope: motion_stamp/default
+    - tag: rl_stamp_tracking
+      scope: rl_stamp_tracking/default
+    - tag: rl_power_shot_tracking
+      scope: rl_power_shot_tracking/default
+    - tag: kick
+      scope: kick/default
+    - tag: rl_jumping_tracking
+      scope: rl_jumping_tracking/default
+    - tag: rl_bilidance_tracking
+      scope: rl_bilidance_tracking/default
     - tag: ros2_bridge
       scope: ros2_bridge/default

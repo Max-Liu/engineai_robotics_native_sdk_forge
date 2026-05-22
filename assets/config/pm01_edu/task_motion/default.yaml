@@ -34,6 +34,11 @@ tasks:
   - passive
   - walk
   - dance
+  - stamp
+  - power_shot
+  - kick
+  - jumping
+  - bilidance
   key: [ LB, A ]
 
 - motion: walk
@@ -47,6 +52,10 @@ tasks:
   - pd_stand
   - dance
   - stamp
+  - power_shot
+  - kick
+  - jumping
+  - bilidance
   key: [ LB, B ]
 
 - motion: dance
@@ -58,17 +67,100 @@ tasks:
   - passive
   - pd_stand
   - walk
+  - stamp
+  - power_shot
+  - kick
+  - jumping
+  - bilidance
   auto_transition: walk
   key: [ RB, B ]
 
 - motion: stamp
-  period: 0.03333333333
+  period: 0.02
   runner:
-  - name: motion_stamp_runner
+  - name: rl_tracking_motion_runner
     enabled: true
+    param_tag: rl_stamp_tracking
   manual_transition:
   - passive
   - pd_stand
   - walk
+  - dance
+  - power_shot
+  - kick
+  - jumping
+  - bilidance
   auto_transition: walk
   key: [ RB, A ]
+
+- motion: power_shot
+  period: 0.02
+  runner:
+  - name: rl_tracking_motion_runner
+    enabled: true
+    param_tag: rl_power_shot_tracking
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  - stamp
+  - kick
+  - jumping
+  - bilidance
+  auto_transition: walk
+  key: [ RB, X ]
+
+- motion: kick
+  period: 0.02
+  runner:
+  - name: rl_tracking_motion_runner
+    enabled: true
+    param_tag: kick
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  - stamp
+  - power_shot
+  - jumping
+  - bilidance
+  auto_transition: walk
+  key: [ LB, X ]
+
+- motion: jumping
+  period: 0.02
+  runner:
+  - name: rl_tracking_motion_runner
+    enabled: true
+    param_tag: rl_jumping_tracking
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  - stamp
+  - power_shot
+  - kick
+  - bilidance
+  auto_transition: walk
+  key: [ LB, Y ]
+
+- motion: bilidance
+  period: 0.02
+  runner:
+  - name: rl_tracking_motion_runner
+    enabled: true
+    param_tag: rl_bilidance_tracking
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  - stamp
+  - power_shot
+  - kick
+  - jumping
+  auto_transition: walk
+  key: [ RB, Y ]

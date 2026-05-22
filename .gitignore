@@ -38,3 +38,8 @@ _build
 .lastformat
 .cache
 build.claude/settings.local.json
+
+*.mnn
+*.onnx
+*.npz
+*.placeholder

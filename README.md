@@ -1,210 +1,242 @@
-# EngineAI Native SDK: Native Control Framework for Humanoid Robots
+# EngineAI Robotics Native SDK Fork
 
-[中文](README_CN.md) | English
+This repository is a fork of the official
+[engineai-robotics/engineai_robotics_native_sdk](https://github.com/engineai-robotics/engineai_robotics_native_sdk).
 
-**Documentation:** [EngineAI Native SDK Documentation](https://dx3a2bminsq.feishu.cn/wiki/KyD9wDc4mi03uXkTVuAc5LQan4C)
+It keeps the original EngineAI Native SDK architecture and toolchain, while adding practical fixes and workflow improvements for local development, deployment, controller operation, and motion extension.
+
+If you find a problem or have an improvement, pull requests are welcome.
+
+## What This Fork Adds
+
+- **Deployment fixes:** fixes and adjustments for issues encountered when deploying and running the SDK in real development environments.
+- **macOS gamepad support:** physical gamepads connected to macOS can be bridged into the Docker-based SDK runtime, including HID backend support for controllers such as DUALSHOCK 4.
+- **Simpler motion extension:** whole-body RL tracking motions can be added through configuration and policy files, without copying runner code or creating new per-motion C++ classes when the shared tracking interface is sufficient.
+- **Improved simulation workflow on macOS:** MuJoCo can be run in Docker with browser-based VNC viewing for systems where native container GUI display is unavailable.
+
+For the original upstream project, documentation, and baseline implementation, see:
+
+- Upstream repository: <https://github.com/engineai-robotics/engineai_robotics_native_sdk>
+- EngineAI Native SDK documentation: <https://dx3a2bminsq.feishu.cn/wiki/KyD9wDc4mi03uXkTVuAc5LQan4C>
 
 ## Overview
 
-This repository provides the EngineAI Native Control SDK, designed for humanoid robot application development and system integration. It delivers a lightweight, easily deployable control and task execution framework with strong extensibility. Through standardized interfaces and modular architecture, the SDK significantly reduces the complexity of secondary development and functional integration, allowing developers to focus on algorithm research and application implementation.
+The EngineAI Native SDK is a C++20 humanoid robot control framework for application development, simulation verification, and real-robot deployment. It provides a modular runtime, runner-based motion control plugins, robot-specific configuration files, model and parameter management, MuJoCo simulation support, and deployment scripts.
 
-To support robot algorithm development, simulation verification, and real-robot deployment, the repository provides a complete runtime framework and simulation-deployment toolchain. Core modules include:
+The major modules are:
 
-- **High-Performance Precompiled Scheduling Framework** — Provides a high-performance scheduling mechanism for real-time robot control and inference tasks. Precompilation optimizations reduce runtime overhead and improve overall system execution efficiency and stability.
-- **Configuration-Driven Task Orchestration System** — Employs a configuration-based task orchestration approach for flexible organization of algorithm modules, control flows, and data pipelines, enabling rapid adjustment of experiment workflows and system operating strategies.
-- **Extensible Model and Parameter Management System** — Provides unified interfaces for model loading, version management, and parameter configuration, facilitating centralized management and iteration of algorithm models, control parameters, and experiment configurations.
-- **Modular Business Plugin Mechanism** — Based on a plugin architecture that supports flexible extension and decoupling of perception, planning, and control modules, enabling rapid integration of new algorithms and features.
-- **Mujoco Simulation and Real-Robot Deployment Toolchain** — Provides a complete Mujoco simulation environment and real-robot deployment scripts, supporting fast migration from simulation verification to real robot systems.
+- **Runtime executor:** starts the control framework and manages task execution.
+- **Runner plugins:** implement motion/control behaviors and load policies or parameters.
+- **Hardware drivers:** connect the runtime to robot hardware interfaces.
+- **ROS2 bridge nodes:** expose selected SDK data and control interfaces to ROS2.
+- **Protocol definitions:** define messages and services used by the system.
+- **Robot assets:** store robot configs, policy paths, models, and resources.
+- **Simulation tools:** build and run the MuJoCo simulation environment.
+- **Virtual gamepad tools:** provide GUI, keyboard, and physical-controller input paths.
 
-Additionally, the repository includes URDF and other robot model files that are consistent with the real robot hardware structure, used for simulation environment construction, kinematics/dynamics computation, and algorithm verification, ensuring good consistency between simulation results and real systems.
+## Repository Layout
 
-## Repository Structure
-
-```
+```text
 native_sdk/
-├── assets/              # Resource files (models, configs, etc.)
-│   └── config/          # Robot-specific configuration files
-├── core/                # Core framework library
-├── docker/              # Container environment scripts
-│   └── generate.sh      # Generate container dev environment
-├── scripts/             # Utility scripts (simulation build/run, etc.)
-├── simulation/          # Mujoco simulation module
-├── src/                 # Application source code
-│   ├── runner/          # Motion control modules (Runner plugins)
-│   ├── executor/        # Executor module
-│   └── data/            # Data processing module
-├── build.sh             # Build script
-├── run.sh               # Run script
-└── install.sh           # Real-robot deployment script
+├── assets/
+│   ├── config/              # Robot-specific runtime configuration
+│   └── resource/            # Robot models and resources
+├── core/                    # Core framework libraries
+├── docker/                  # Docker development environment
+├── docs/                    # README images and supporting docs
+├── scripts/                 # Build, simulation, and runtime helpers
+├── simulation/mujoco/       # MuJoCo simulation code
+├── src/
+│   ├── executor/            # Runtime entry and executor logic
+│   ├── runner/              # Motion/control runner plugins
+│   ├── hardware/            # Hardware drivers
+│   ├── ros2_node/           # ROS2 bridge nodes
+│   ├── protocol/            # Interface protocol definitions
+│   └── data/                # Data and parameter modules
+├── tools/virtual_gamepad/   # Virtual and physical gamepad bridge
+├── build.sh                 # Main SDK build script
+├── run.sh                   # Local runtime launcher
+└── install.sh               # Real-robot deployment script
 ```
 
----
+Generated build output belongs in `build/`.
 
-## 1. Development Environment & Quick Start
+## Quick Start
 
-### 1.1 Container Environment
+All compile, test, and runtime commands should be executed inside the Docker development environment.
 
-- **Install Docker and Docker Compose**  
-  Docker provides an automated setup script that supports installation on Debian, RHEL, SUSE and their derivatives.  
-  Note: Docker does not recommend using this script to install Docker CE in production.
+### 1. Install Docker
 
-  ```bash
-  curl -fsSL https://get.docker.com -o get-docker.sh
-  sudo sh get-docker.sh
+Install Docker and Docker Compose:
 
-  # Users in China may use a mirror (e.g. Tsinghua mirror)
-  export DOWNLOAD_URL="https://mirrors.tuna.tsinghua.edu.cn/docker-ce"
-  curl -fsSL https://get.docker.com -o get-docker.sh
-  sudo sh get-docker.sh
-  ```
+```bash
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+```
 
-- **Allow running Docker without sudo**
+Users in China may use a mirror:
 
-  ```bash
-  sudo usermod -aG docker $USER
-  ```
+```bash
+export DOWNLOAD_URL="https://mirrors.tuna.tsinghua.edu.cn/docker-ce"
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+```
 
-  **After running this, you must log out of your desktop session and log back in (or reboot) for the group change to take effect.**
+Allow running Docker without `sudo`:
 
-- **Verify installation**
+```bash
+sudo usermod -aG docker $USER
+```
 
-  ```bash
-  docker --version
-  ```
+Log out and log back in, or reboot, for the Docker group change to take effect.
 
-  Example output:
+Verify the installation:
 
-  ```plain
-  Docker version 26.1.1
-  ```
+```bash
+docker --version
+docker compose version
+```
 
-- **Verify Docker Compose**
-
-  ```bash
-  docker compose version
-  ```
-
-  Example output:
-
-  ```plain
-  Docker Compose version v2.27.0
-  ```
-
-- **Generate the container development environment.** Upon completion, a shortcut entry `engineai_robotics_env` will be created:
+### 2. Generate the Development Container
 
 ```bash
 cd native_sdk
 ./docker/generate.sh
 ```
+
+The script creates a container and mounts this repository into it. It also creates the `engineai_robotics_env` shortcut.
+
 ![Container development environment generation](docs/generate_docker.png)
 
-This command creates a container and mounts the current repository into it, so you can build and run the program inside the container.
-
-Open a new terminal and enter the development environment using the shortcut command:
+Open a new terminal and enter the container:
 
 ```bash
 engineai_robotics_env
 ```
+
 ![Inside the container development environment](docs/inside_docker.png)
 
-### 1.2 Build
+### 3. Build
 
 ```bash
-# Enter the container
 engineai_robotics_env
-
-# Build
 ./build.sh
 ```
 
-### 1.3 Run
+Build with GoogleTest targets enabled:
 
 ```bash
-# Enter the container
+./build.sh -t debug -T
+```
+
+Rebuild one runner after a full build:
+
+```bash
+./build.sh -m rl_walking_example
+```
+
+### 4. Run
+
+```bash
 engineai_robotics_env
 
-# Run with default robot model
+# Run with the default robot model
 ./run.sh
 
 # Run with a specific robot model
 ./run.sh pm01_edu
 ```
 
-### 1.4 State Switching
+After startup, the runtime enters `idle` by default.
 
-After program startup, the robot switches between different motion states via remote controller commands. The Native SDK uses a **Finite State Machine (FSM) mechanism**:
+## Testing
 
-- Each motion state defines explicit entry conditions and allowed state transitions. The system only permits state switching when conditions are met, ensuring the safety and stability of robot motion control.
-#### Remote Controller
+Tests are built only when `BUILD_TESTS` is enabled, normally through `./build.sh -T`.
 
-##### Physical Gamepad (Logitech F710)
-- Use Logitech Wireless Gamepad F710 (Xbox mode)
-- Automatically recognized after inserting the USB receiver
-- All state transitions triggered by handpad buttons
+```bash
+engineai_robotics_env
+./build.sh -t debug -T
+ctest --test-dir build --output-on-failure
+```
 
-##### Physical Gamepad on macOS
-macOS supports connecting various Bluetooth/USB gamepads (e.g. DUALSHOCK 4, Xbox controllers). The virtual gamepad tool includes a **gamepad bridge** that reads physical controller input on macOS and publishes LCM messages into the Docker container.
+Avoid tests that require live robot hardware unless the hardware requirements and operator assumptions are clearly documented.
 
-**List connected gamepads:**
+## Controller Operation
+
+The SDK switches robot motion states through a finite state machine. Each state declares explicit entry conditions and allowed transitions so that unsafe transitions are rejected.
+
+### Logitech F710
+
+Use a Logitech Wireless Gamepad F710 in Xbox mode. After the USB receiver is connected, the controller should be recognized automatically in the container environment.
+
+### macOS Physical Gamepad Bridge
+
+This fork supports using physical controllers connected to macOS and forwarding their input into the Docker runtime through the virtual gamepad tool.
+
+List connected gamepads:
 
 ```bash
 python3 tools/virtual_gamepad/virtual_gamepad.py --list-gamepads
 ```
 
-**Run the gamepad bridge without GUI:**
+Run the bridge without GUI:
 
 ```bash
-python3 tools/virtual_gamepad/virtual_gamepad.py --no-gui --lcm-url 'udpm://239.255.76.67:7667?ttl=1'
+python3 tools/virtual_gamepad/virtual_gamepad.py --no-gui \
+  --lcm-url 'udpm://239.255.76.67:7667?ttl=1'
 ```
 
-**For Bluetooth DUALSHOCK 4 (when pygame/SDL does not recognize it), use the HID backend:**
+For Bluetooth DUALSHOCK 4 or other controllers not recognized correctly by pygame/SDL, use the HID backend:
 
 ```bash
-python3 tools/virtual_gamepad/virtual_gamepad.py --no-gui --backend hid --lcm-url 'udpm://239.255.76.67:7667?ttl=1'
+python3 tools/virtual_gamepad/virtual_gamepad.py --no-gui --backend hid \
+  --lcm-url 'udpm://239.255.76.67:7667?ttl=1'
 ```
 
-> **Note:** If the HID backend reports `Failed to open DUALSHOCK 4 HID input device`, grant **Input Monitoring** permission to Terminal/Codex in macOS System Settings, then reconnect the controller.
-
-**When Docker Desktop blocks host-to-container multicast/UDP, use the docker-exec relay:**
+If Docker Desktop blocks host-to-container multicast or UDP traffic, use the docker-exec relay:
 
 ```bash
 python3 tools/virtual_gamepad/virtual_gamepad.py --no-gui --backend hid \
   --docker-container engineai_robotics_env
 ```
 
+If the HID backend reports `Failed to open DUALSHOCK 4 HID input device`, grant Input Monitoring permission to Terminal or the active shell application in macOS System Settings, then reconnect the controller.
+
 For full CLI options and controller calibration, see [tools/virtual_gamepad/README.md](tools/virtual_gamepad/README.md).
 
-##### Virtual Gamepad (Virtual Gamepad UI)
-- Provides a graphical virtual gamepad interface
-- Supports keyboard button and slider input simulation
-- Uses the same control mapping relationship as F710 (XBox mode), with full control logic compatibility
+### Virtual Gamepad UI
+
+The virtual gamepad provides a GUI for keyboard buttons and slider-based input simulation. It uses the same control mapping as the F710 in Xbox mode.
 
 ```bash
-# in docker
 python3 tools/virtual_gamepad/virtual_gamepad.py
 ```
 
 ![Virtual Gamepad Interface](docs/virtual_gamepad.png)
 
-#### System Startup
+## State Transitions
 
-After executing `./run.sh` or `./run_robot.sh`, the system enters the **idle** state by default. `idle` is the initial safe state after the robot is powered on — the controller does not activate active motion control.
+The runtime starts in `idle`. The main safety fallback is `LB + RB`, which forces the system back to `passive` from any state.
 
-#### State Transition Overview
-
-| Current State | Allowed Target State | Trigger Keys | Description |
-|:-------------:|:--------------------:|:------------:|:------------|
-| idle | passive | LB + RB | Transition from inactive to damping state |
+| Current State | Target State | Trigger Keys | Description |
+|:-------------:|:------------:|:------------:|:------------|
+| idle | passive | LB + RB | Enter damping/passive state |
 | passive | idle | LB + START | Return to inactive state |
-| passive | pd_stand | LB + A | Enter stable standing control task |
-| pd_stand | walk | LB + B | Enter walking task after stable standing |
-| pd_stand | dance | LB + CROSS_X_DOWN | Enter dance task after stable standing |
-| walk | pd_stand | LB + A | Return to stable standing from walking |
-| walk | dance | LB + CROSS_X_DOWN | Switch from walking to dance task |
-| dance | pd_stand | LB + A | Return to stable standing from dance |
-| dance | walk | LB + B | Switch from dance to walking task |
-
-#### State Flow Diagram
+| passive | pd_stand | LB + A | Enter stable standing control |
+| pd_stand | walk | LB + B | Enter walking after stable standing |
+| pd_stand | dance | RB + B | Enter dance after stable standing |
+| pd_stand | stamp | RB + A | Trigger Stamp tracking motion |
+| pd_stand | power_shot | RB + X | Trigger Power Shot tracking motion |
+| walk | pd_stand | LB + A | Return from walking to standing |
+| walk | dance | RB + B | Switch from walking to dance |
+| walk | stamp | RB + A | Trigger Stamp from walking |
+| walk | power_shot | RB + X | Trigger Power Shot from walking |
+| dance | pd_stand | LB + A | Return from dance to standing |
+| dance | walk | LB + B | Switch from dance to walking |
+| dance | stamp | RB + A | Trigger Stamp from dance |
+| dance | power_shot | RB + X | Trigger Power Shot from dance |
+| stamp | pd_stand | auto / LB + A | Return to standing after Stamp |
+| power_shot | walk | auto / LB + B | Enter walking after Power Shot |
 
 ```mermaid
 stateDiagram-v2
@@ -212,134 +244,208 @@ stateDiagram-v2
 
     idle --> passive : LB + RB
     passive --> idle : LB + START
-
     passive --> pd_stand : LB + A
 
     state Motion_Control {
         direction LR
         pd_stand --> walk : LB + B
-        pd_stand --> dance : LB + CROSS_X_DOWN
+        pd_stand --> dance : RB + B
+        pd_stand --> stamp : RB + A
+        pd_stand --> power_shot : RB + X
         walk --> pd_stand : LB + A
-        dance --> walk : LB + B
+        walk --> dance : RB + B
+        walk --> stamp : RB + A
+        walk --> power_shot : RB + X
         dance --> pd_stand : LB + A
-        walk --> dance : LB + CROSS_X_DOWN
-        
+        dance --> walk : LB + B
+        dance --> stamp : RB + A
+        dance --> power_shot : RB + X
+        stamp --> pd_stand : auto / LB + A
+        power_shot --> walk : auto / LB + B
     }
 
     note right of passive : Any state can return to\npassive via LB + RB
 ```
 
-#### Global Safety Mechanism (Emergency Fallback)
+## Adding New Whole-Body RL Tracking Motions
 
-> **Any state** can be forcefully switched to `passive` via **`LB + RB`**.
+This fork significantly reduces the work required to add a new whole-body RL tracking motion when the policy uses the shared MNN tracking interface.
 
-This functions as a **Soft Emergency Stop**:
+For these motions, use the common `rl_tracking_motion_runner`. Do not copy an existing tracking runner and do not add a per-motion C++ runner or parameter class unless the policy requires a different tensor interface, observation layout, or action post-processing path that cannot be represented in YAML.
 
-- Immediately terminates the current motion control logic
-- Returns the system to a safe passive state
-- Critical for debugging and real-world operation — reduces the risk of motion control runaway
+### 1. Add the Motion Config
 
-### 1.5 Mujoco Simulation
+Create:
 
-#### 1.5.1 Build
-
-```bash
-# Enter the container
-engineai_robotics_env
-
-# Build the simulation module
-./scripts/build_mujoco.sh
-
-# If GitHub is not accessible, use this command to fetch dependencies from Gitee and build
-./scripts/build_mujoco.sh -m
+```text
+assets/config/<robot>/<motion_tag>/default.yaml
 ```
 
-#### 1.5.2 Run
+Set `policy_file` to the policy path under that motion directory, usually:
 
-> Before running, ensure that `active_mode` is set to `sim` in `assets/config/<robot>/mode.yaml`.
+```yaml
+policy_file: <motion_tag>/policies/policy.mnn
+```
+
+Use the shared tracking schema:
+
+```yaml
+time_step_total: 0
+joint_names: []
+joint_stiffness: []
+joint_damping: []
+default_joint_pos: []
+action_scale: []
+observation_names: []
+observation_history_lengths: []
+transition_duration_s: 0.0
+loop_motion: false
+reset_observation_history_on_loop: true
+auto_transition: true
+align_reference_to_robot_anchor: true
+```
+
+Keep `observation_names` in the supported order:
+
+```yaml
+observation_names:
+  - command
+  - motion_anchor_pos_b
+  - motion_anchor_ori_b
+  - base_ang_vel
+  - joint_pos
+  - joint_vel
+  - actions
+  - projected_gravity
+  - joint_error
+  - motion_phase
+```
+
+### 2. Register the Parameter Scope
+
+Add the new `param_tag` and scope to:
+
+```text
+assets/config/<robot>/mode.yaml
+```
+
+Example:
+
+```yaml
+<motion_tag>: <motion_tag>/default
+```
+
+### 3. Add the Task Motion Entry
+
+Add a motion entry in:
+
+```text
+assets/config/<robot>/task_motion/default.yaml
+```
+
+Use:
+
+```yaml
+runner: rl_tracking_motion_runner
+param_tag: <motion_tag>
+```
+
+Configure transitions, period, and key bindings in the same file.
+
+### 4. Build the Shared Runner
+
+For selective builds, use:
 
 ```bash
-# Enter the container
+ENGINEAI_ROBOTICS_USED_RUNNERS=rl_tracking_motion_runner ./build.sh
+```
+
+After a full build, rebuild the runner with:
+
+```bash
+./build.sh -m rl_tracking_motion
+```
+
+Only add a new C++ runner module when the motion cannot use the shared tracking YAML schema.
+
+## MuJoCo Simulation
+
+### Build
+
+```bash
+engineai_robotics_env
+./scripts/build_mujoco.sh
+```
+
+If GitHub dependencies are not accessible, use the mirror mode:
+
+```bash
+./scripts/build_mujoco.sh --mirror-deps
+```
+
+### Run
+
+Before running, make sure `active_mode` is set to `sim` in:
+
+```text
+assets/config/<robot>/mode.yaml
+```
+
+Then start the simulation:
+
+```bash
 engineai_robotics_env
 
-# Run simulation (default robot model)
+# Default robot
 ./scripts/run_mujoco.sh
 
-# Run with a specific robot model
+# Specific robot
 ./scripts/run_mujoco.sh pm01_edu
 ```
 
-After launching, use the remote controller to switch states.
+After launch, use the controller to switch states.
 
-#### 1.5.3 Running MuJoCo Simulation on macOS
+### Run MuJoCo on macOS with VNC
 
-macOS + Docker Desktop does not support native GUI display from containers. Use the built-in VNC remote viewing to run MuJoCo headless and access it via your browser.
-
-**Start MuJoCo simulation with VNC:**
+macOS with Docker Desktop does not support native GUI display from containers. Use the built-in VNC workflow to run MuJoCo headless and view it in a browser.
 
 ```bash
 ./scripts/start_mujoco_vnc.sh
 ```
 
-This script:
-1. Builds the MuJoCo simulation module (if not already built)
-2. Starts the container with Xvfb (virtual framebuffer) + x11vnc
-3. Launches a noVNC WebSocket proxy on your Mac
-4. Opens your browser to `http://localhost:6080/vnc.html`
+The script builds MuJoCo if needed, starts a virtual framebuffer and x11vnc in the container, starts a noVNC WebSocket proxy on macOS, and opens:
 
-Click **Connect** (no password required) to see and interact with the simulation.
+```text
+http://localhost:6080/vnc.html
+```
 
-**Stop the VNC session:**
+Stop the VNC session:
 
 ```bash
 ./scripts/start_mujoco_vnc.sh --stop
 ```
 
-> **Requirements:** `pip3 install websockets` on your Mac. The proxy extracts noVNC static files from the container automatically on first run.
-
-#### 1.5.4 Improving Simulation Performance
-
-If you have a dedicated NVIDIA GPU with proper drivers installed, you can enable GPU passthrough in Docker to improve simulation rendering frame rates.
-
-**Step 1: Install the NVIDIA Docker Toolkit**
+Requirement on macOS:
 
 ```bash
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
-  && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
-
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
+pip3 install websockets
 ```
 
-**Step 2: Enable GPU Passthrough**
+### GPU Rendering on Linux
 
-Set `NVIDIA_GPU_AVAILABLE` to `y` in `docker/generate.sh`:
-
-```bash
-NVIDIA_GPU_AVAILABLE=y
-```
-
-**Step 3: Regenerate the Container Environment**
+If the host has a supported NVIDIA GPU and drivers, install the NVIDIA Container Toolkit, set `NVIDIA_GPU_AVAILABLE=y` in `docker/generate.sh`, and regenerate the container:
 
 ```bash
 ./docker/generate.sh
 ```
 
-After restarting the container, GPU-accelerated rendering will be available.
+## Real-Robot Deployment
 
----
+Real-robot operation is deployment-sensitive. Confirm hardware state, network access, operator readiness, and emergency stop availability before running motion control.
 
-### 1.6 Real-Robot Deployment
+### Configure Deployment Target
 
-#### 1.6.1 Configure Deployment Target
-
-Edit the deployment target parameters in `install.sh`:
+Edit `install.sh`:
 
 ```bash
 remote_user="user"
@@ -347,7 +453,7 @@ remote_host="192.168.0.163"
 remote_dir="~/projects/engineai_robotics"
 ```
 
-Execute the installation:
+Deploy:
 
 ```bash
 cd native_sdk
@@ -356,42 +462,42 @@ cd native_sdk
 ./install.sh pm01_edu robot
 ```
 
-#### 1.6.2 Running on the Real Robot
+### Run on the Robot
 
-> [!CAUTION]
-> **Safety Notice:**
-> - Ensure all personnel maintain a safe distance from the robot
-> - If the robot behaves abnormally, stop it immediately (press the emergency stop button or switch to `passive` mode)
-> - It is recommended to suspend the robot on a gantry first. After entering `pd_stand` mode, lower it to the ground before switching to walking mode
+Pre-run checks:
 
-**Pre-run Preparation:**
+1. Enable the robot motor system using the emergency stop remote controller.
+2. Connect to the robot hotspot or use Ethernet.
+3. Keep personnel away from the robot workspace.
+4. Prefer suspending the robot on a gantry before first standing and walking tests.
 
-1. Enable the robot's motor system using the emergency stop remote controller
-2. Connect to the robot's hotspot or use an Ethernet cable to connect to the robot
-
-**Startup Steps:**
+Startup:
 
 ```bash
-# SSH into the robot (Nezha)
 ssh user@192.168.0.163
-
-# Stop the auto-started motion control service
 sudo systemctl stop robotics.service
 
-# Launch native_sdk
 cd ~/projects/engineai_robotics
 sudo ./run_robot.sh pm01_edu
 ```
 
-**Running in Background:**
+Run in the background:
 
 ```bash
 nohup sudo ./run_robot.sh pm01_edu > nohup.out 2>&1 &
 tail -f nohup.out
 ```
 
-After launching, use the remote controller to switch actions as described in [State Switching](#14-state-switching).
+If the robot behaves abnormally, stop it immediately with the physical emergency stop or switch to `passive` with `LB + RB`.
+
+## Development Notes
+
+- Use C++20, two-space indentation, and `.cc` / `.h` extensions.
+- Prefer existing CMake helpers such as `get_namespace` and `add_googletest`.
+- Keep robot-specific behavior in `assets/config/<robot>/` whenever possible.
+- Use `rl_tracking_motion_runner` for shared-interface RL tracking motions.
+- Do not commit generated build output, local secrets, crash dumps, or machine-specific permissions.
 
 ## License
 
-This project is licensed under the [BSD 3-Clause License](LICENSE.txt).
+This project follows the upstream license and is licensed under the [BSD 3-Clause License](LICENSE.txt).
