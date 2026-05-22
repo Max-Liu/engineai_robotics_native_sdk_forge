@@ -43,6 +43,8 @@ mode:
       scope: pd_stand/robot
     - tag: rl_walking_example
       scope: rl_walking_example/default
+    - tag: rl_lab
+      scope: rl_lab/default
     - tag: rl_dance_example
       scope: rl_dance_example/default
     - tag: rl_stamp_tracking
@@ -87,6 +89,8 @@ mode:
       scope: pd_stand/default
     - tag: rl_walking_example
       scope: rl_walking_example/default
+    - tag: rl_lab
+      scope: rl_lab/default
     - tag: rl_dance_example
       scope: rl_dance_example/default
     - tag: rl_stamp_tracking

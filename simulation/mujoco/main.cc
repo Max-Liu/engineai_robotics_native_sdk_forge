@@ -610,6 +610,9 @@ bool InitMain(int argc, char** argv) {
     return false;
   }
 
+  FLAGS_alsologtostderr = true;
+  FLAGS_stderrthreshold = google::GLOG_WARNING;
+  FLAGS_colorlogtostderr = true;
   google::InitGoogleLogging(argv[0]);
   LOG(INFO) << "Loaded config files from: " << common::GlobalPathManager::GetInstance().GetConfigPath();
 

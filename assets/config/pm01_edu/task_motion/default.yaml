@@ -33,6 +33,7 @@ tasks:
   manual_transition:
   - passive
   - walk
+  - rl_lab
   - dance
   - stamp
   - power_shot
@@ -50,6 +51,7 @@ tasks:
   manual_transition:
   - passive
   - pd_stand
+  - rl_lab
   - dance
   - stamp
   - power_shot
@@ -57,6 +59,18 @@ tasks:
   - jumping
   - bilidance
   key: [ LB, B ]
+
+- motion: rl_lab
+  period: 0.01
+  runner:
+  - name: rl_lab_runner
+    enabled: true
+  manual_transition:
+  - passive
+  - pd_stand
+  - walk
+  - dance
+  key: [ LB, X ]
 
 - motion: dance
   period: 0.02
@@ -127,7 +141,7 @@ tasks:
   - jumping
   - bilidance
   auto_transition: walk
-  key: [ LB, X ]
+  key: [ LB, A ]
 
 - motion: jumping
   period: 0.02
