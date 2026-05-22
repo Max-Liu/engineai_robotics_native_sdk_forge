@@ -216,56 +216,75 @@ python3 tools/virtual_gamepad/virtual_gamepad.py
 
 ## State Transitions
 
-The runtime starts in `idle`. The main safety fallback is `LB + RB`, which forces the system back to `passive` from any state.
+The runtime starts in `idle`. State transition logic varies by robot model, and the task motion YAML is the source of truth for available states, allowed transitions, runner bindings, periods, and key bindings.
 
-| Current State | Target State | Trigger Keys | Description |
-|:-------------:|:------------:|:------------:|:------------|
-| idle | passive | LB + RB | Enter damping/passive state |
-| passive | idle | LB + START | Return to inactive state |
-| passive | pd_stand | LB + A | Enter stable standing control |
-| pd_stand | walk | LB + B | Enter walking after stable standing |
-| pd_stand | dance | RB + B | Enter dance after stable standing |
-| pd_stand | stamp | RB + A | Trigger Stamp tracking motion |
-| pd_stand | power_shot | RB + X | Trigger Power Shot tracking motion |
-| walk | pd_stand | LB + A | Return from walking to standing |
-| walk | dance | RB + B | Switch from walking to dance |
-| walk | stamp | RB + A | Trigger Stamp from walking |
-| walk | power_shot | RB + X | Trigger Power Shot from walking |
-| dance | pd_stand | LB + A | Return from dance to standing |
-| dance | walk | LB + B | Switch from dance to walking |
-| dance | stamp | RB + A | Trigger Stamp from dance |
-| dance | power_shot | RB + X | Trigger Power Shot from dance |
-| stamp | pd_stand | auto / LB + A | Return to standing after Stamp |
-| power_shot | walk | auto / LB + B | Enter walking after Power Shot |
+The main safety fallback is `LB + RB`, which forces the system back to `passive` from any state.
 
-```mermaid
-stateDiagram-v2
-    direction LR
+### pm01_edu
 
-    idle --> passive : LB + RB
-    passive --> idle : LB + START
-    passive --> pd_stand : LB + A
+**State Machine Configuration:** `assets/config/pm01_edu/task_motion/default.yaml`
 
-    state Motion_Control {
-        direction LR
-        pd_stand --> walk : LB + B
-        pd_stand --> dance : RB + B
-        pd_stand --> stamp : RB + A
-        pd_stand --> power_shot : RB + X
-        walk --> pd_stand : LB + A
-        walk --> dance : RB + B
-        walk --> stamp : RB + A
-        walk --> power_shot : RB + X
-        dance --> pd_stand : LB + A
-        dance --> walk : LB + B
-        dance --> stamp : RB + A
-        dance --> power_shot : RB + X
-        stamp --> pd_stand : auto / LB + A
-        power_shot --> walk : auto / LB + B
-    }
+| State | Description |
+|:-----:|:------------|
+| idle | Initial safe state after power-on. No active motion control is activated. |
+| passive | Damping state. The controller applies passive damping torque; the robot can be moved manually. |
+| pd_stand | Stable standing control task. The robot maintains a fixed upright posture via PD control. |
+| walk | Walking task. The robot executes gait locomotion. |
+| rl_lab | RL Lab task. Deployment counterpart for the EngineAI open-source RL training framework [engineai_amp](https://github.com/engineai-robotics/engineai_amp). Executes policies trained with engineai_amp on real hardware. |
+| dance | Dance task. The robot executes predefined choreographed motion sequences. |
+| stamp | Whole-body RL tracking motion using `rl_tracking_motion_runner`. |
+| power_shot | Whole-body RL tracking motion using `rl_tracking_motion_runner`. |
+| kick | Whole-body RL tracking motion using `rl_tracking_motion_runner`. |
+| jumping | Whole-body RL tracking motion using `rl_tracking_motion_runner`. |
+| bilidance | Whole-body RL tracking motion using `rl_tracking_motion_runner`. |
 
-    note right of passive : Any state can return to\npassive via LB + RB
-```
+Current `pm01_edu` key bindings:
+
+| Target Motion | Trigger Keys | Notes |
+|:-------------:|:------------:|:------|
+| idle | LB + START | Return from `passive` to inactive state. |
+| passive | LB + RB | Enter damping/passive state; also used as the global safety fallback. |
+| pd_stand | LB + A | Enter stable standing from `passive`, or return to standing from motion states. |
+| walk | LB + B | Enter walking. |
+| rl_lab | LB + X | Enter RL Lab policy runner. |
+| dance | RB + B | Enter dance. |
+| stamp | RB + A | Trigger Stamp tracking motion. |
+| power_shot | RB + X | Trigger Power Shot tracking motion. |
+| kick | LB + A | Trigger Kick tracking motion according to the current fork configuration. |
+| jumping | LB + Y | Trigger Jumping tracking motion. |
+| bilidance | RB + Y | Trigger Bilidance tracking motion. |
+
+### t800
+
+**State Machine Configuration:** `assets/config/t800/task_motion/default.yaml`
+
+| State | Description |
+|:-----:|:------------|
+| idle | Initial safe state after power-on. No active motion control is activated. |
+| passive | Damping state. The controller applies passive damping torque; the robot can be moved manually. |
+| pd_stand | Stable standing control task. The robot maintains a fixed upright posture via PD control. |
+| walk | Walking task. The robot executes gait locomotion. |
+| dance | Dance task. The robot executes predefined choreographed motion sequences. |
+
+Current `t800` key bindings:
+
+| Target Motion | Trigger Keys | Notes |
+|:-------------:|:------------:|:------|
+| idle | LB + START | Return from `passive` to inactive state. |
+| passive | LB + RB | Enter damping/passive state; also used as the global safety fallback. |
+| pd_stand | LB + A | Enter stable standing or return to standing. |
+| walk | LB + B | Enter walking. |
+| dance | RB + B | Enter dance. |
+
+### Global Safety Mechanism
+
+Any state can be forcefully switched to `passive` via `LB + RB`.
+
+This functions as a soft emergency stop:
+
+- Immediately terminates the current motion control logic.
+- Returns the system to a safe passive state.
+- Reduces the risk of motion control runaway during debugging and real-world operation.
 
 ## Adding New Whole-Body RL Tracking Motions
 
