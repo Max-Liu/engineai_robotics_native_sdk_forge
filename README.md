@@ -347,7 +347,68 @@ observation_names:
   - motion_phase
 ```
 
-### 2. Register the Parameter Scope
+### 2. Sync Policy Metadata and Convert to MNN
+
+For an existing tracking motion, place the exported ONNX policy under the resolved `param_tag` directory:
+
+```text
+assets/config/<robot>/<param_tag>/policies/policy.onnx
+```
+
+Install the Python dependencies in the environment where you run the converter:
+
+```bash
+python3 -m pip install -U onnx MNN PyYAML
+```
+
+Then run the converter by task motion name:
+
+```bash
+python3 tools/convert_policy_to_mnn.py jumping --robot pm01_edu
+```
+
+If the converter executable is not discoverable, pass the real `mnnconvert` path:
+
+```bash
+python3 tools/convert_policy_to_mnn.py jumping --robot pm01_edu \
+  --converter "$(which mnnconvert)"
+```
+
+or:
+
+```bash
+python3 tools/convert_policy_to_mnn.py jumping --robot pm01_edu \
+  --converter /home/engineai/miniconda3/envs/env_isaaclab/bin/mnnconvert
+```
+
+Do not pass `--input` or `--output` in motion mode. The script resolves the task motion to its `rl_tracking_motion_runner` `param_tag` from `task_motion/default.yaml`, verifies that `mode.yaml` maps that tag to `<param_tag>/default`, reads `<param_tag>/policies/policy.onnx`, updates `<param_tag>/default.yaml` from ONNX metadata, converts to `policy.mnn.tmp`, and atomically replaces `policy.mnn` only after conversion succeeds.
+
+The ONNX metadata is treated as the source of truth for:
+
+```text
+time_step_total
+joint_names
+joint_stiffness
+joint_damping
+default_joint_pos
+action_scale
+observation_names
+observation_history_lengths
+```
+
+Runtime behavior fields that are not exported in the ONNX metadata are preserved from the existing YAML, including `policy_io_mcap_enabled`, `policy_io_mcap_dir`, `transition_duration_s`, `loop_motion`, `reset_observation_history_on_loop`, `auto_transition`, and `align_reference_to_robot_anchor`.
+
+The script also validates that the motion uses `rl_tracking_motion_runner`, the `param_tag` is mapped to `<param_tag>/default`, the observation layout matches the shared runner, joint arrays have matching lengths, and the ONNX tensors use the expected names and shapes.
+
+Direct ONNX-to-MNN conversion is still available for non-motion workflows:
+
+```bash
+python3 tools/convert_policy_to_mnn.py \
+  --input path/to/policy.onnx \
+  --output path/to/policy.mnn
+```
+
+### 3. Register the Parameter Scope
 
 Add the new `param_tag` and scope to:
 
@@ -361,7 +422,7 @@ Example:
 <motion_tag>: <motion_tag>/default
 ```
 
-### 3. Add the Task Motion Entry
+### 4. Add the Task Motion Entry
 
 Add a motion entry in:
 
@@ -378,7 +439,7 @@ param_tag: <motion_tag>
 
 Configure transitions, period, and key bindings in the same file.
 
-### 4. Build the Shared Runner
+### 5. Build the Shared Runner
 
 For selective builds, use:
 
