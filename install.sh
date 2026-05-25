@@ -27,6 +27,14 @@ if [ $# -lt 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 fi
 product_name="$1"
 active_mode="$2"
+case "$active_mode" in
+    robot|sim)
+        ;;
+    *)
+        echo -e "\033[31mERROR: unsupported mode '$active_mode'. Expected 'robot' or 'sim'.\033[0m"
+        exit 1
+        ;;
+esac
 echo "Installing for product: $product_name with mode: $active_mode"
 
 temp_dir=$(mktemp -d)
@@ -78,12 +86,15 @@ ssh -o ControlMaster=yes -o ControlPath="${ssh_control_path}" -o ControlPersist=
 
 # Ensures the remote directory exists (reuses connection, no password)
 ssh -o ControlPath="${ssh_control_path}" "${remote_dest}" "mkdir -p $remote_dir"
+remote_abs_dir=$(ssh -o ControlPath="${ssh_control_path}" "${remote_dest}" "cd $remote_dir && pwd -P")
+echo "Resolved remote directory: ${remote_abs_dir}"
 
-rsync -avz --delete -e "ssh -o ControlPath=${ssh_control_path}" "${temp_dir}/" "${remote_dest}:$remote_dir"
+rsync -avz --delete -e "ssh -o ControlPath=${ssh_control_path}" "${temp_dir}/" "${remote_dest}:${remote_abs_dir}/"
 
 # Updates active_mode in remote mode.yaml (same logic as in scripts/package.sh)
-remote_mode_yaml="${remote_dir}/assets/config/${product_name}/mode.yaml"
-ssh -o ControlPath="${ssh_control_path}" "${remote_dest}" "sed -i 's/^active_mode:.*$/active_mode: $active_mode/' $remote_mode_yaml"
+remote_mode_yaml="${remote_abs_dir}/assets/config/${product_name}/mode.yaml"
+ssh -o ControlPath="${ssh_control_path}" "${remote_dest}" "test -f '$remote_mode_yaml' && sed -i 's/^active_mode:.*$/active_mode: $active_mode/' '$remote_mode_yaml' && grep -q '^active_mode: $active_mode$' '$remote_mode_yaml'"
 echo "Updated active_mode to '$active_mode' in remote $remote_mode_yaml"
+ssh -o ControlPath="${ssh_control_path}" "${remote_dest}" "grep '^active_mode:' '$remote_mode_yaml'"
 
-echo "Congratulations! Installed to ${remote_user}@${remote_host}:${remote_dir}"
+echo "Congratulations! Installed to ${remote_user}@${remote_host}:${remote_abs_dir}"

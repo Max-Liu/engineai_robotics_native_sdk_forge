@@ -88,9 +88,10 @@ setup_ros
 
 # Gets the source directory
 source_dir=$(cd $(dirname $0) && pwd)
+cd "$source_dir"
 
 echo "[INFO] Exports the environment variables:"
-export ENGINEAI_ROBOTICS_DIR="$PWD"
+export ENGINEAI_ROBOTICS_DIR="$source_dir"
 echo "[INFO] ENGINEAI_ROBOTICS_DIR=$ENGINEAI_ROBOTICS_DIR"
 
 export ENGINEAI_ROBOTICS_ASSETS="$ENGINEAI_ROBOTICS_DIR/assets"
