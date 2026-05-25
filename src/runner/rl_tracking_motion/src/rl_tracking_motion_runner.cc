@@ -118,6 +118,17 @@ bool LinkStateLooksInitialized(const data::LinkInfo &link) {
          frame.pose.quaternion.vec().norm() > 1.0e-6;
 }
 
+PolicyIoLinkState ToPolicyIoLinkState(const data::LinkInfo &link) {
+  PolicyIoLinkState state;
+  state.position = link.frame.pose.position;
+  state.quaternion = link.frame.pose.quaternion;
+  state.linear_velocity = link.frame.twist.linear;
+  state.angular_velocity = link.frame.twist.angular;
+  state.linear_acceleration = link.frame.acceleration.linear;
+  state.angular_acceleration = link.frame.acceleration.angular;
+  return state;
+}
+
 Eigen::Quaternionf RowToQuaternion(const Eigen::MatrixXf &matrix, int row) {
   Eigen::Quaternionf quat(matrix(row, 0), matrix(row, 1), matrix(row, 2),
                           matrix(row, 3));
@@ -327,6 +338,7 @@ void RlTrackingMotionRunner::Run() {
 
   try {
     ReadCurrentState();
+    LogRobotState();
     PolicyOutputs reference = SampleReference(time_step_);
 
     if (!policy_started_) {
@@ -700,6 +712,7 @@ RlTrackingMotionRunner::BuildPolicyIoMcapLoggerConfig() const {
       config.command_joint_names[static_cast<size_t>(joint_id)] = joint_name;
     }
   }
+  config.state_joint_names = config.command_joint_names;
   config.observation_names = param_->observation_names;
   config.observation_history_lengths = param_->observation_history_lengths;
   config.num_actions = param_->num_actions;
@@ -721,7 +734,7 @@ RlTrackingMotionRunner::BuildPolicyIoMcapLoggerConfig() const {
 
 void RlTrackingMotionRunner::LogReferencePolicyIo(
     const Eigen::VectorXf &obs, int time_step, const PolicyOutputs &outputs) {
-  if (!policy_io_logger_) {
+  if (!policy_io_logger_ || !policy_io_logger_->IsEnabled()) {
     return;
   }
   policy_io_logger_->RecordReference(
@@ -732,7 +745,7 @@ void RlTrackingMotionRunner::LogReferencePolicyIo(
 void RlTrackingMotionRunner::LogActionPolicyIo(const Eigen::VectorXf &obs,
                                                int time_step,
                                                const PolicyOutputs &outputs) {
-  if (!policy_io_logger_) {
+  if (!policy_io_logger_ || !policy_io_logger_->IsEnabled()) {
     return;
   }
   policy_io_logger_->RecordAction(
@@ -741,7 +754,7 @@ void RlTrackingMotionRunner::LogActionPolicyIo(const Eigen::VectorXf &obs,
 }
 
 void RlTrackingMotionRunner::LogJointCommandFeedback() {
-  if (!policy_io_logger_) {
+  if (!policy_io_logger_ || !policy_io_logger_->IsEnabled()) {
     return;
   }
 
@@ -754,6 +767,46 @@ void RlTrackingMotionRunner::LogJointCommandFeedback() {
   command.damping = joint_kd_;
   policy_io_logger_->RecordJointCommandFeedback(
       PolicyIoInvocationContext{iter_, time_step_, runner_period_}, command);
+}
+
+void RlTrackingMotionRunner::LogRobotState() {
+  if (!policy_io_logger_ || !policy_io_logger_->IsEnabled()) {
+    return;
+  }
+
+  PolicyIoRobotState state;
+  data_store_->joint_info.GetState(data::JointInfoType::kPosition,
+                                   state.joint_state.position);
+  data_store_->joint_info.GetState(data::JointInfoType::kVelocity,
+                                   state.joint_state.velocity);
+  data_store_->joint_info.GetState(data::JointInfoType::kTorque,
+                                   state.joint_state.torque);
+  data_store_->motor_info.GetState(data::JointInfoType::kPosition,
+                                   state.motor_state.position);
+  data_store_->motor_info.GetState(data::JointInfoType::kVelocity,
+                                   state.motor_state.velocity);
+  data_store_->motor_info.GetState(data::JointInfoType::kTorque,
+                                   state.motor_state.torque);
+
+  const auto imu = data_store_->imu_info.Get();
+  state.imu.quaternion = imu->quaternion;
+  state.imu.rpy = imu->rpy;
+  state.imu.linear_acceleration = imu->linear_acceleration;
+  state.imu.angular_velocity = imu->angular_velocity;
+
+  const data::LinkInfo base_state =
+      *data_store_->base_state_in_world.Get();
+  const data::LinkInfo simulated_base_state =
+      *data_store_->simulated_base_state_in_world.Get();
+  const AnchorStateSelection anchor = SelectRobotAnchorState();
+  state.base_state_in_world = ToPolicyIoLinkState(base_state);
+  state.simulated_base_state_in_world =
+      ToPolicyIoLinkState(simulated_base_state);
+  state.selected_anchor_state = ToPolicyIoLinkState(anchor.state);
+  state.selected_anchor_source = anchor.source;
+
+  policy_io_logger_->RecordRobotState(
+      PolicyIoInvocationContext{iter_, time_step_, runner_period_}, state);
 }
 
 void RlTrackingMotionRunner::CalculateWarmupMotorCommand(
@@ -835,23 +888,28 @@ void RlTrackingMotionRunner::AdvanceTimeStep() {
   }
 }
 
-data::LinkInfo RlTrackingMotionRunner::GetRobotAnchorState() const {
+RlTrackingMotionRunner::AnchorStateSelection
+RlTrackingMotionRunner::SelectRobotAnchorState() const {
   data::LinkInfo simulated_base =
       *data_store_->simulated_base_state_in_world.Get();
   if (LinkStateLooksInitialized(simulated_base)) {
-    return simulated_base;
+    return {simulated_base, "simulated_base_state_in_world"};
   }
 
   data::LinkInfo estimated_base = *data_store_->base_state_in_world.Get();
   if (LinkStateLooksInitialized(estimated_base)) {
-    return estimated_base;
+    return {estimated_base, "base_state_in_world"};
   }
 
   data::LinkInfo fallback;
   auto imu = data_store_->imu_info.Get();
   fallback.frame.pose.quaternion = imu->quaternion;
   fallback.frame.twist.angular = imu->angular_velocity;
-  return fallback;
+  return {fallback, "imu_fallback"};
+}
+
+data::LinkInfo RlTrackingMotionRunner::GetRobotAnchorState() const {
+  return SelectRobotAnchorState().state;
 }
 
 } // namespace runner

@@ -52,6 +52,28 @@ has_local_mujoco_deps() {
   [ -f "$deps_dir/glfw3-src/CMakeLists.txt" ] && [ -f "$deps_dir/lodepng-src/lodepng.cpp" ]
 }
 
+prepare_build_dir() {
+  local cache_file="$build_dir/CMakeCache.txt"
+
+  if [ ! -f "$cache_file" ]; then
+    return
+  fi
+
+  local cached_source_dir
+  local cached_build_dir
+  cached_source_dir="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache_file" | tail -n 1)"
+  cached_build_dir="$(sed -n 's/^CMAKE_CACHEFILE_DIR:INTERNAL=//p' "$cache_file" | tail -n 1)"
+
+  if [ "$cached_source_dir" != "$mujoco_dir" ] || [ "$cached_build_dir" != "$build_dir" ]; then
+    echo "Existing MuJoCo CMake cache belongs to a different checkout; recreating $build_dir"
+    echo "  cached source: ${cached_source_dir:-unknown}"
+    echo "  current source: $mujoco_dir"
+    echo "  cached build:  ${cached_build_dir:-unknown}"
+    echo "  current build:  $build_dir"
+    cmake -E rm -rf "$build_dir"
+  fi
+}
+
 parse_args "$@"
 
 if [[ "${use_mirror_deps:-0}" == "1" ]]; then
@@ -72,7 +94,8 @@ fi
 
 # Builds the project
 build_dir="$mujoco_dir/build"
-mkdir -p $build_dir && cd $build_dir
+prepare_build_dir
+mkdir -p "$build_dir" && cd "$build_dir"
 cmake "${cmake_args[@]}" ..
 
 # Compiles with 2 threads less than the number of cores
@@ -81,4 +104,3 @@ if [ $num_cores -lt 1 ]; then
   num_cores=$(nproc)
 fi
 cmake --build . --parallel $num_cores
-

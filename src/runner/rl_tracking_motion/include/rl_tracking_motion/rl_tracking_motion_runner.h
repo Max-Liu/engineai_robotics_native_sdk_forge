@@ -38,6 +38,11 @@ private:
     bool initialized = false;
   };
 
+  struct AnchorStateSelection {
+    data::LinkInfo state;
+    std::string source;
+  };
+
   void InitializeJointMapping();
   void InitializeObservationBuffers();
   void InitializeReferenceAlignment();
@@ -54,6 +59,7 @@ private:
   void CalculateMotorCommand(const Eigen::VectorXf &action);
   void SendMotorCommand();
   void AdvanceTimeStep();
+  AnchorStateSelection SelectRobotAnchorState() const;
   data::LinkInfo GetRobotAnchorState() const;
   PolicyIoMcapLoggerConfig BuildPolicyIoMcapLoggerConfig() const;
   void LogReferencePolicyIo(const Eigen::VectorXf &obs, int time_step,
@@ -61,6 +67,7 @@ private:
   void LogActionPolicyIo(const Eigen::VectorXf &obs, int time_step,
                          const PolicyOutputs &outputs);
   void LogJointCommandFeedback();
+  void LogRobotState();
 
   std::shared_ptr<data::RlTrackingMotionParam> param_;
   std::unique_ptr<TrackingPolicyModel> policy_;

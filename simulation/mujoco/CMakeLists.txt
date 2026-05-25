@@ -30,6 +30,10 @@ include(GetAliasNamespace)
 
 # Set some options
 option(BUILD_RELEASE "Build release version" ON)
+option(BUILD_TESTS "Build tests" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+endif()
 
 # Some necessary settings
 set(CMAKE_CXX_STANDARD 20)

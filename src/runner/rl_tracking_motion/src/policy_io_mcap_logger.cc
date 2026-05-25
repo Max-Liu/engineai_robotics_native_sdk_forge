@@ -1,14 +1,21 @@
 #include "rl_tracking_motion/policy_io_mcap_logger.h"
 
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cctype>
 #include <cstddef>
 #include <cstdlib>
 #include <ctime>
+#include <deque>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
+#include <utility>
+#include <variant>
 
 #include <glog/logging.h>
 #include <mcap/writer.hpp>
@@ -18,6 +25,7 @@
 namespace runner {
 namespace {
 
+constexpr int kSchemaVersion = 2;
 constexpr std::string_view kProfile = "json";
 constexpr std::string_view kMessageEncoding = "json";
 constexpr std::string_view kSchemaEncoding = "jsonschema";
@@ -28,6 +36,7 @@ constexpr std::string_view kReferenceTopic =
 constexpr std::string_view kActionTopic = "/rl_tracking_motion/policy/action";
 constexpr std::string_view kJointCommandFeedbackInvocation =
     "joint_command_feedback";
+constexpr std::string_view kRobotStateInvocation = "robot_state";
 constexpr std::string_view kMetadataName =
     "rl_tracking_motion_policy_io_metadata";
 
@@ -93,6 +102,14 @@ nlohmann::json VectorToJson(const Eigen::VectorXd &value) {
   return out;
 }
 
+nlohmann::json VectorToJson(const Eigen::Vector3d &value) {
+  return {value.x(), value.y(), value.z()};
+}
+
+nlohmann::json QuaternionWxyzToJson(const Eigen::Quaterniond &value) {
+  return {value.w(), value.x(), value.y(), value.z()};
+}
+
 nlohmann::json MatrixToRowMajorJson(const Eigen::MatrixXf &value) {
   nlohmann::json out = nlohmann::json::array();
   for (Eigen::Index row = 0; row < value.rows(); ++row) {
@@ -127,6 +144,73 @@ nlohmann::json JointCommandShapesJson(int num_joints) {
   };
 }
 
+nlohmann::json JointStateShapesJson(int num_joints) {
+  return {
+      {"position", {num_joints}},
+      {"velocity", {num_joints}},
+      {"torque", {num_joints}},
+  };
+}
+
+nlohmann::json ImuShapesJson() {
+  return {
+      {"quaternion_wxyz", {4}},
+      {"rpy", {3}},
+      {"linear_acceleration", {3}},
+      {"angular_velocity", {3}},
+  };
+}
+
+nlohmann::json LinkStateShapesJson() {
+  return {
+      {"position", {3}},
+      {"quaternion_wxyz", {4}},
+      {"linear_velocity", {3}},
+      {"angular_velocity", {3}},
+      {"linear_acceleration", {3}},
+      {"angular_acceleration", {3}},
+  };
+}
+
+nlohmann::json RobotStateShapesJson(int num_joints) {
+  return {
+      {"joint_state", JointStateShapesJson(num_joints)},
+      {"motor_state", JointStateShapesJson(num_joints)},
+      {"imu", ImuShapesJson()},
+      {"base_state_in_world", LinkStateShapesJson()},
+      {"simulated_base_state_in_world", LinkStateShapesJson()},
+      {"selected_anchor_state", LinkStateShapesJson()},
+  };
+}
+
+nlohmann::json JointStateJson(const PolicyIoJointState &state) {
+  return {
+      {"position", VectorToJson(state.position)},
+      {"velocity", VectorToJson(state.velocity)},
+      {"torque", VectorToJson(state.torque)},
+  };
+}
+
+nlohmann::json ImuStateJson(const PolicyIoImuState &state) {
+  return {
+      {"quaternion_wxyz", QuaternionWxyzToJson(state.quaternion)},
+      {"rpy", VectorToJson(state.rpy)},
+      {"linear_acceleration", VectorToJson(state.linear_acceleration)},
+      {"angular_velocity", VectorToJson(state.angular_velocity)},
+  };
+}
+
+nlohmann::json LinkStateJson(const PolicyIoLinkState &state) {
+  return {
+      {"position", VectorToJson(state.position)},
+      {"quaternion_wxyz", QuaternionWxyzToJson(state.quaternion)},
+      {"linear_velocity", VectorToJson(state.linear_velocity)},
+      {"angular_velocity", VectorToJson(state.angular_velocity)},
+      {"linear_acceleration", VectorToJson(state.linear_acceleration)},
+      {"angular_acceleration", VectorToJson(state.angular_acceleration)},
+  };
+}
+
 nlohmann::json ObservationLayoutJson(
     const std::vector<PolicyIoObservationTermLayout> &layout) {
   nlohmann::json out = nlohmann::json::array();
@@ -157,7 +241,7 @@ nlohmann::json BuildSchemaJson() {
         "iter", "runner_time_step", "runner_period_s", "log_time_ns"}},
       {"properties",
        {
-           {"schema_version", {{"type", "integer"}, {"const", 1}}},
+           {"schema_version", {{"type", "integer"}, {"const", kSchemaVersion}}},
            {"runner", {{"type", "string"}}},
            {"param_tag", {{"type", "string"}}},
            {"policy_file", {{"type", "string"}}},
@@ -200,6 +284,18 @@ nlohmann::json BuildSchemaJson() {
                   {"stiffness", number_array},
                   {"damping", number_array},
               }}}},
+           {"robot_state",
+            {{"type", "object"},
+             {"properties",
+              {
+                  {"joint_state", {{"type", "object"}}},
+                  {"motor_state", {{"type", "object"}}},
+                  {"imu", {{"type", "object"}}},
+                  {"base_state_in_world", {{"type", "object"}}},
+                  {"simulated_base_state_in_world", {{"type", "object"}}},
+                  {"selected_anchor_state", {{"type", "object"}}},
+                  {"selected_anchor_source", {{"type", "string"}}},
+              }}}},
        }},
   };
 }
@@ -210,12 +306,10 @@ class PolicyIoMcapLogger::Impl {
 public:
   void Start(const PolicyIoMcapLoggerConfig &config) {
     Close();
+    ResetRuntimeState();
     config_ = config;
+    max_pending_messages_ = config_.max_pending_messages;
     file_path_.clear();
-    reference_sequence_ = 0;
-    action_sequence_ = 0;
-    joint_command_feedback_sequence_ = 0;
-    metadata_written_ = false;
 
     if (!config_.enabled) {
       return;
@@ -237,9 +331,10 @@ public:
         return;
       }
 
-      open_ = true;
-      enabled_ = true;
+      open_.store(true, std::memory_order_release);
       RegisterSchemaAndChannels();
+      writer_thread_ = std::thread(&Impl::WriterLoop, this);
+      accepting_.store(true, std::memory_order_release);
       LOG(INFO) << "[PolicyIoMcapLogger] Writing RL tracking policy I/O to "
                 << file_path_;
     } catch (const std::exception &error) {
@@ -248,8 +343,18 @@ public:
   }
 
   void Close() {
-    if (!open_) {
-      enabled_ = false;
+    accepting_.store(false, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      stopping_ = true;
+    }
+    queue_cv_.notify_one();
+
+    if (writer_thread_.joinable()) {
+      writer_thread_.join();
+    }
+
+    if (!open_.load(std::memory_order_acquire)) {
       return;
     }
 
@@ -257,7 +362,7 @@ public:
       if (!metadata_written_) {
         WriteMetadata();
       }
-      if (!open_) {
+      if (!open_.load(std::memory_order_acquire)) {
         return;
       }
       writer_.close();
@@ -267,57 +372,288 @@ public:
       writer_.terminate();
     }
 
-    open_ = false;
-    enabled_ = false;
+    open_.store(false, std::memory_order_release);
   }
 
   void Record(std::string_view invocation,
               const PolicyIoInvocationContext &context,
               const Eigen::VectorXf &obs, int time_step,
               const PolicyOutputs &outputs) {
-    if (!enabled_ || !open_) {
+    if (!IsEnabled()) {
+      DropAfterErrorIfNeeded();
       return;
     }
 
+    PolicyRecord record;
+    record.invocation =
+        invocation == "reference" ? PolicyInvocation::kReference
+                                  : PolicyInvocation::kAction;
+    record.context = context;
+    record.obs = obs;
+    record.time_step = time_step;
+    record.outputs = outputs;
+    record.log_time_ns = NowNs();
+    TryEnqueue(PendingRecord{std::move(record)});
+  }
+
+  void RecordJointCommandFeedback(const PolicyIoInvocationContext &context,
+                                  const PolicyIoJointCommand &command) {
+    if (!IsEnabled()) {
+      DropAfterErrorIfNeeded();
+      return;
+    }
+
+    JointCommandFeedbackRecord record;
+    record.context = context;
+    record.command = command;
+    record.log_time_ns = NowNs();
+    TryEnqueue(PendingRecord{std::move(record)});
+  }
+
+  void RecordRobotState(const PolicyIoInvocationContext &context,
+                        const PolicyIoRobotState &state) {
+    if (!IsEnabled()) {
+      DropAfterErrorIfNeeded();
+      return;
+    }
+
+    RobotStateRecord record;
+    record.context = context;
+    record.state = state;
+    record.log_time_ns = NowNs();
+    TryEnqueue(PendingRecord{std::move(record)});
+  }
+
+  bool IsEnabled() const {
+    return accepting_.load(std::memory_order_acquire) &&
+           open_.load(std::memory_order_acquire) &&
+           !writer_failed_.load(std::memory_order_acquire);
+  }
+
+  PolicyIoMcapLoggerStats GetStats() const {
+    PolicyIoMcapLoggerStats stats;
+    stats.enqueued_messages =
+        enqueued_messages_.load(std::memory_order_relaxed);
+    stats.written_messages = written_messages_.load(std::memory_order_relaxed);
+    stats.dropped_queue_full =
+        dropped_queue_full_.load(std::memory_order_relaxed);
+    stats.dropped_lock_busy =
+        dropped_lock_busy_.load(std::memory_order_relaxed);
+    stats.dropped_after_error =
+        dropped_after_error_.load(std::memory_order_relaxed);
+    stats.write_errors = write_errors_.load(std::memory_order_relaxed);
+    stats.max_queue_depth = max_queue_depth_.load(std::memory_order_relaxed);
+    return stats;
+  }
+
+  const std::filesystem::path &FilePath() const { return file_path_; }
+
+private:
+  enum class PolicyInvocation {
+    kReference,
+    kAction,
+  };
+
+  struct PolicyRecord {
+    PolicyInvocation invocation = PolicyInvocation::kReference;
+    PolicyIoInvocationContext context;
+    Eigen::VectorXf obs;
+    int time_step = 0;
+    PolicyOutputs outputs;
+    uint64_t log_time_ns = 0;
+  };
+
+  struct JointCommandFeedbackRecord {
+    PolicyIoInvocationContext context;
+    PolicyIoJointCommand command;
+    uint64_t log_time_ns = 0;
+  };
+
+  struct RobotStateRecord {
+    PolicyIoInvocationContext context;
+    PolicyIoRobotState state;
+    uint64_t log_time_ns = 0;
+  };
+
+  using PendingRecord =
+      std::variant<PolicyRecord, JointCommandFeedbackRecord, RobotStateRecord>;
+
+  std::string BuildFileName() const {
+    std::ostringstream out;
+    out << "rl_tracking_motion_" << SanitizeForFilename(config_.param_tag)
+        << "_" << TimestampForFilename() << "_" << getpid() << ".mcap";
+    return out.str();
+  }
+
+  void ResetRuntimeState() {
+    reference_sequence_ = 0;
+    action_sequence_ = 0;
+    joint_command_feedback_sequence_ = 0;
+    robot_state_sequence_ = 0;
+    metadata_written_ = false;
+    accepting_.store(false, std::memory_order_release);
+    writer_failed_.store(false, std::memory_order_release);
+    open_.store(false, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      pending_records_.clear();
+      stopping_ = false;
+    }
+    enqueued_messages_.store(0, std::memory_order_relaxed);
+    written_messages_.store(0, std::memory_order_relaxed);
+    dropped_queue_full_.store(0, std::memory_order_relaxed);
+    dropped_lock_busy_.store(0, std::memory_order_relaxed);
+    dropped_after_error_.store(0, std::memory_order_relaxed);
+    write_errors_.store(0, std::memory_order_relaxed);
+    max_queue_depth_.store(0, std::memory_order_relaxed);
+  }
+
+  void DropAfterErrorIfNeeded() {
+    if (writer_failed_.load(std::memory_order_acquire)) {
+      dropped_after_error_.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  void TryEnqueue(PendingRecord record) {
+    if (writer_failed_.load(std::memory_order_acquire)) {
+      dropped_after_error_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    if (!accepting_.load(std::memory_order_acquire) ||
+        !open_.load(std::memory_order_acquire)) {
+      return;
+    }
+
+    std::unique_lock<std::mutex> lock(queue_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+      dropped_lock_busy_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+
+    if (writer_failed_.load(std::memory_order_acquire)) {
+      dropped_after_error_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+    if (!accepting_.load(std::memory_order_acquire) ||
+        !open_.load(std::memory_order_acquire)) {
+      return;
+    }
+    if (pending_records_.size() >= max_pending_messages_) {
+      dropped_queue_full_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
+
+    pending_records_.push_back(std::move(record));
+    const auto queue_depth = pending_records_.size();
+    enqueued_messages_.fetch_add(1, std::memory_order_relaxed);
+    UpdateMaxQueueDepth(queue_depth);
+    lock.unlock();
+    queue_cv_.notify_one();
+  }
+
+  void UpdateMaxQueueDepth(std::size_t queue_depth) {
+    uint64_t current = max_queue_depth_.load(std::memory_order_relaxed);
+    while (queue_depth > current &&
+           !max_queue_depth_.compare_exchange_weak(
+               current, static_cast<uint64_t>(queue_depth),
+               std::memory_order_relaxed)) {
+    }
+  }
+
+  void WriterLoop() {
+    std::deque<PendingRecord> batch;
+    while (true) {
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        queue_cv_.wait(lock, [this] {
+          return stopping_ || !pending_records_.empty() ||
+                 writer_failed_.load(std::memory_order_acquire);
+        });
+        if (pending_records_.empty()) {
+          if (stopping_ ||
+              writer_failed_.load(std::memory_order_acquire)) {
+            break;
+          }
+          continue;
+        }
+        batch.swap(pending_records_);
+      }
+
+      while (!batch.empty()) {
+        if (writer_failed_.load(std::memory_order_acquire)) {
+          dropped_after_error_.fetch_add(batch.size(),
+                                         std::memory_order_relaxed);
+          batch.clear();
+          DropPendingAfterError();
+          return;
+        }
+
+        std::visit([this](const auto &record) { WriteRecord(record); },
+                   batch.front());
+        batch.pop_front();
+      }
+
+      if (writer_failed_.load(std::memory_order_acquire)) {
+        DropPendingAfterError();
+        return;
+      }
+    }
+  }
+
+  void DropPendingAfterError() {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    const auto dropped = pending_records_.size();
+    pending_records_.clear();
+    stopping_ = true;
+    if (dropped > 0) {
+      dropped_after_error_.fetch_add(dropped, std::memory_order_relaxed);
+    }
+  }
+
+  void WriteRecord(const PolicyRecord &record) {
     try {
-      const uint64_t now_ns = NowNs();
+      const bool is_reference =
+          record.invocation == PolicyInvocation::kReference;
+      const std::string_view invocation = is_reference ? "reference" : "action";
       nlohmann::json payload = {
-          {"schema_version", 1},
+          {"schema_version", kSchemaVersion},
           {"runner", config_.runner},
           {"param_tag", config_.param_tag},
           {"policy_file", config_.policy_file},
-          {"invocation", invocation},
-          {"iter", context.iter},
-          {"runner_time_step", context.runner_time_step},
-          {"runner_period_s", context.runner_period_s},
-          {"log_time_ns", now_ns},
+          {"invocation", std::string(invocation)},
+          {"iter", record.context.iter},
+          {"runner_time_step", record.context.runner_time_step},
+          {"runner_period_s", record.context.runner_period_s},
+          {"log_time_ns", record.log_time_ns},
           {"inputs",
            {
-               {"obs", VectorToJson(obs)},
-               {"time_step", {static_cast<float>(time_step)}},
+               {"obs", VectorToJson(record.obs)},
+               {"time_step", {static_cast<float>(record.time_step)}},
            }},
           {"outputs",
            {
-               {"actions", VectorToJson(outputs.actions)},
-               {"joint_pos", VectorToJson(outputs.joint_pos)},
-               {"joint_vel", VectorToJson(outputs.joint_vel)},
-               {"body_pos_w", MatrixToRowMajorJson(outputs.body_pos_w)},
-               {"body_quat_w", MatrixToRowMajorJson(outputs.body_quat_w)},
+               {"actions", VectorToJson(record.outputs.actions)},
+               {"joint_pos", VectorToJson(record.outputs.joint_pos)},
+               {"joint_vel", VectorToJson(record.outputs.joint_vel)},
+               {"body_pos_w",
+                MatrixToRowMajorJson(record.outputs.body_pos_w)},
+               {"body_quat_w",
+                MatrixToRowMajorJson(record.outputs.body_quat_w)},
                {"body_lin_vel_w",
-                MatrixToRowMajorJson(outputs.body_lin_vel_w)},
+                MatrixToRowMajorJson(record.outputs.body_lin_vel_w)},
                {"body_ang_vel_w",
-                MatrixToRowMajorJson(outputs.body_ang_vel_w)},
+                MatrixToRowMajorJson(record.outputs.body_ang_vel_w)},
            }},
       };
 
       const std::string payload_string = payload.dump();
       mcap::Message message;
       message.channelId =
-          invocation == "reference" ? reference_channel_.id : action_channel_.id;
+          is_reference ? reference_channel_.id : action_channel_.id;
       message.sequence =
-          invocation == "reference" ? reference_sequence_++ : action_sequence_++;
-      message.logTime = now_ns;
-      message.publishTime = now_ns;
+          is_reference ? reference_sequence_++ : action_sequence_++;
+      message.logTime = record.log_time_ns;
+      message.publishTime = record.log_time_ns;
       message.dataSize = payload_string.size();
       message.data =
           reinterpret_cast<const std::byte *>(payload_string.data());
@@ -325,40 +661,36 @@ public:
       auto status = writer_.write(message);
       if (!status.ok()) {
         DisableAfterError("write", status.message);
+        return;
       }
+      written_messages_.fetch_add(1, std::memory_order_relaxed);
     } catch (const std::exception &error) {
       DisableAfterError("record", error.what());
     }
   }
 
-  void RecordJointCommandFeedback(const PolicyIoInvocationContext &context,
-                                  const PolicyIoJointCommand &command) {
-    if (!enabled_ || !open_) {
-      return;
-    }
-
+  void WriteRecord(const JointCommandFeedbackRecord &record) {
     try {
-      const uint64_t now_ns = NowNs();
       nlohmann::json payload = {
-          {"schema_version", 1},
+          {"schema_version", kSchemaVersion},
           {"runner", config_.runner},
           {"param_tag", config_.param_tag},
           {"policy_file", config_.policy_file},
           {"invocation", std::string(kJointCommandFeedbackInvocation)},
-          {"iter", context.iter},
-          {"runner_time_step", context.runner_time_step},
-          {"runner_period_s", context.runner_period_s},
-          {"log_time_ns", now_ns},
+          {"iter", record.context.iter},
+          {"runner_time_step", record.context.runner_time_step},
+          {"runner_period_s", record.context.runner_period_s},
+          {"log_time_ns", record.log_time_ns},
           {"topic", config_.joint_command_feedback_topic},
           {"joint_command_feedback",
            {
-               {"position", VectorToJson(command.position)},
-               {"velocity", VectorToJson(command.velocity)},
+               {"position", VectorToJson(record.command.position)},
+               {"velocity", VectorToJson(record.command.velocity)},
                {"feed_forward_torque",
-                VectorToJson(command.feed_forward_torque)},
-               {"torque", VectorToJson(command.torque)},
-               {"stiffness", VectorToJson(command.stiffness)},
-               {"damping", VectorToJson(command.damping)},
+                VectorToJson(record.command.feed_forward_torque)},
+               {"torque", VectorToJson(record.command.torque)},
+               {"stiffness", VectorToJson(record.command.stiffness)},
+               {"damping", VectorToJson(record.command.damping)},
            }},
       };
 
@@ -366,8 +698,8 @@ public:
       mcap::Message message;
       message.channelId = joint_command_feedback_channel_.id;
       message.sequence = joint_command_feedback_sequence_++;
-      message.logTime = now_ns;
-      message.publishTime = now_ns;
+      message.logTime = record.log_time_ns;
+      message.publishTime = record.log_time_ns;
       message.dataSize = payload_string.size();
       message.data =
           reinterpret_cast<const std::byte *>(payload_string.data());
@@ -375,22 +707,62 @@ public:
       auto status = writer_.write(message);
       if (!status.ok()) {
         DisableAfterError("write joint command feedback", status.message);
+        return;
       }
+      written_messages_.fetch_add(1, std::memory_order_relaxed);
     } catch (const std::exception &error) {
       DisableAfterError("record joint command feedback", error.what());
     }
   }
 
-  bool IsEnabled() const { return enabled_ && open_; }
+  void WriteRecord(const RobotStateRecord &record) {
+    try {
+      nlohmann::json payload = {
+          {"schema_version", kSchemaVersion},
+          {"runner", config_.runner},
+          {"param_tag", config_.param_tag},
+          {"policy_file", config_.policy_file},
+          {"invocation", std::string(kRobotStateInvocation)},
+          {"iter", record.context.iter},
+          {"runner_time_step", record.context.runner_time_step},
+          {"runner_period_s", record.context.runner_period_s},
+          {"log_time_ns", record.log_time_ns},
+          {"topic", config_.robot_state_topic},
+          {"robot_state",
+           {
+               {"joint_state", JointStateJson(record.state.joint_state)},
+               {"motor_state", JointStateJson(record.state.motor_state)},
+               {"imu", ImuStateJson(record.state.imu)},
+               {"base_state_in_world",
+                LinkStateJson(record.state.base_state_in_world)},
+               {"simulated_base_state_in_world",
+                LinkStateJson(record.state.simulated_base_state_in_world)},
+               {"selected_anchor_state",
+                LinkStateJson(record.state.selected_anchor_state)},
+               {"selected_anchor_source",
+                record.state.selected_anchor_source},
+           }},
+      };
 
-  const std::filesystem::path &FilePath() const { return file_path_; }
+      const std::string payload_string = payload.dump();
+      mcap::Message message;
+      message.channelId = robot_state_channel_.id;
+      message.sequence = robot_state_sequence_++;
+      message.logTime = record.log_time_ns;
+      message.publishTime = record.log_time_ns;
+      message.dataSize = payload_string.size();
+      message.data =
+          reinterpret_cast<const std::byte *>(payload_string.data());
 
-private:
-  std::string BuildFileName() const {
-    std::ostringstream out;
-    out << "rl_tracking_motion_" << SanitizeForFilename(config_.param_tag)
-        << "_" << TimestampForFilename() << "_" << getpid() << ".mcap";
-    return out.str();
+      auto status = writer_.write(message);
+      if (!status.ok()) {
+        DisableAfterError("write robot state", status.message);
+        return;
+      }
+      written_messages_.fetch_add(1, std::memory_order_relaxed);
+    } catch (const std::exception &error) {
+      DisableAfterError("record robot state", error.what());
+    }
   }
 
   void RegisterSchemaAndChannels() {
@@ -411,12 +783,17 @@ private:
         config_.joint_command_feedback_topic, kMessageEncoding, schema_.id,
         {{"invocation", std::string(kJointCommandFeedbackInvocation)}});
     writer_.addChannel(joint_command_feedback_channel_);
+
+    robot_state_channel_ =
+        mcap::Channel(config_.robot_state_topic, kMessageEncoding, schema_.id,
+                      {{"invocation", std::string(kRobotStateInvocation)}});
+    writer_.addChannel(robot_state_channel_);
   }
 
   void WriteMetadata() {
     mcap::Metadata metadata;
     metadata.name = std::string(kMetadataName);
-    metadata.metadata["schema_version"] = "1";
+    metadata.metadata["schema_version"] = std::to_string(kSchemaVersion);
     metadata.metadata["runner"] = config_.runner;
     metadata.metadata["param_tag"] = config_.param_tag;
     metadata.metadata["policy_file"] = config_.policy_file;
@@ -424,6 +801,8 @@ private:
         nlohmann::json(config_.joint_names).dump();
     metadata.metadata["command_joint_names"] =
         nlohmann::json(config_.command_joint_names).dump();
+    metadata.metadata["state_joint_names"] =
+        nlohmann::json(config_.state_joint_names).dump();
     metadata.metadata["observation_names"] =
         nlohmann::json(config_.observation_names).dump();
     metadata.metadata["observation_history_lengths"] =
@@ -438,6 +817,10 @@ private:
         JointCommandShapesJson(
             static_cast<int>(config_.command_joint_names.size()))
             .dump();
+    metadata.metadata["robot_state_topic"] = config_.robot_state_topic;
+    metadata.metadata["robot_state_shapes"] =
+        RobotStateShapesJson(static_cast<int>(config_.state_joint_names.size()))
+            .dump();
 
     auto status = writer_.write(metadata);
     if (!status.ok()) {
@@ -448,13 +831,23 @@ private:
   }
 
   void DisableAfterError(std::string_view operation, std::string_view message) {
-    LOG(ERROR) << "[PolicyIoMcapLogger] Disabling MCAP policy I/O logging after "
-               << operation << " failure: " << message;
-    if (open_) {
+    accepting_.store(false, std::memory_order_release);
+    const bool first_error =
+        !writer_failed_.exchange(true, std::memory_order_acq_rel);
+    if (first_error) {
+      write_errors_.fetch_add(1, std::memory_order_relaxed);
+      LOG(ERROR)
+          << "[PolicyIoMcapLogger] Disabling MCAP policy I/O logging after "
+          << operation << " failure: " << message;
+    }
+    if (open_.exchange(false, std::memory_order_acq_rel)) {
       writer_.terminate();
     }
-    open_ = false;
-    enabled_ = false;
+    {
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      stopping_ = true;
+    }
+    queue_cv_.notify_one();
   }
 
   PolicyIoMcapLoggerConfig config_;
@@ -464,12 +857,30 @@ private:
   mcap::Channel reference_channel_;
   mcap::Channel action_channel_;
   mcap::Channel joint_command_feedback_channel_;
+  mcap::Channel robot_state_channel_;
   uint32_t reference_sequence_ = 0;
   uint32_t action_sequence_ = 0;
   uint32_t joint_command_feedback_sequence_ = 0;
+  uint32_t robot_state_sequence_ = 0;
   bool metadata_written_ = false;
-  bool enabled_ = false;
-  bool open_ = false;
+  std::size_t max_pending_messages_ = 4096;
+
+  std::atomic<bool> accepting_{false};
+  std::atomic<bool> writer_failed_{false};
+  std::atomic<bool> open_{false};
+  std::mutex queue_mutex_;
+  std::condition_variable queue_cv_;
+  std::deque<PendingRecord> pending_records_;
+  std::thread writer_thread_;
+  bool stopping_ = false;
+
+  std::atomic<uint64_t> enqueued_messages_{0};
+  std::atomic<uint64_t> written_messages_{0};
+  std::atomic<uint64_t> dropped_queue_full_{0};
+  std::atomic<uint64_t> dropped_lock_busy_{0};
+  std::atomic<uint64_t> dropped_after_error_{0};
+  std::atomic<uint64_t> write_errors_{0};
+  std::atomic<uint64_t> max_queue_depth_{0};
 };
 
 PolicyIoMcapLogger::PolicyIoMcapLogger()
@@ -501,7 +912,16 @@ void PolicyIoMcapLogger::RecordJointCommandFeedback(
   impl_->RecordJointCommandFeedback(context, command);
 }
 
+void PolicyIoMcapLogger::RecordRobotState(
+    const PolicyIoInvocationContext &context, const PolicyIoRobotState &state) {
+  impl_->RecordRobotState(context, state);
+}
+
 bool PolicyIoMcapLogger::IsEnabled() const { return impl_->IsEnabled(); }
+
+PolicyIoMcapLoggerStats PolicyIoMcapLogger::GetStats() const {
+  return impl_->GetStats();
+}
 
 const std::filesystem::path &PolicyIoMcapLogger::FilePath() const {
   return impl_->FilePath();

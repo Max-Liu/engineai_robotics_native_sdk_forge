@@ -7,6 +7,7 @@
 #include <lcm/lcm-cpp.hpp>
 
 #include "lcm_data/SimCommand.hpp"
+#include "lcm_data/SimState.hpp"
 #include "lcm_interface/lcm_data_store.h"
 #include "lcm_interface/periodic_task.h"
 #include "lcm_param/lcm_param.h"
@@ -20,13 +21,16 @@ class LcmSubscriber : public lcm_interface::PeriodicTask {
   void TaskRun() override;
 
   void HandleSimCommand(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const data::SimCommand* msg);
+  void HandleSimReplayState(const lcm::ReceiveBuffer* rbuf, const std::string& channel, const data::SimState* msg);
 
  private:
   std::shared_ptr<LcmDataStore> lcm_data_store_;
   SimCommand sim_command_;
+  SimState sim_replay_state_;
 
   std::shared_ptr<lcm::LCM> lcm_;
-  std::string channel_ = "sim_command";
+  std::string command_channel_ = "sim_command";
+  std::string replay_state_channel_ = "sim_replay_state";
 
   int iter_ = 0;
   static constexpr int kDelayIterations = 100;

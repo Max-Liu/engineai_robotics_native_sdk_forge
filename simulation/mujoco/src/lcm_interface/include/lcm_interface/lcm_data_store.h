@@ -1,6 +1,8 @@
 #ifndef LCM_INTERFACE_INCLUDE_LCM_INTERFACE_LCM_DATA_STORE_H_
 #define LCM_INTERFACE_INCLUDE_LCM_INTERFACE_LCM_DATA_STORE_H_
 
+#include <atomic>
+#include <cstdint>
 #include <Eigen/Dense>
 #include <vector>
 
@@ -85,10 +87,13 @@ class LcmDataStore {
         num_single_contact_dimensions(num_single_contact_dimensions) {
     sim_command.Set(SimCommand(num_joints));
     sim_state.Set(SimState(num_joints, num_contacts, num_single_contact_dimensions));
+    sim_replay_state.Set(SimState(num_joints, num_contacts, num_single_contact_dimensions));
   }
 
   data::GuardedData<SimCommand> sim_command;
   data::GuardedData<SimState> sim_state;
+  data::GuardedData<SimState> sim_replay_state;
+  std::atomic<uint64_t> sim_replay_state_sequence{0};
 
   int num_joints = 0;
   int num_contacts = 0;

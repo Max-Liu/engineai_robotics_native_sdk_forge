@@ -14,6 +14,9 @@
 
 #include <glog/logging.h>
 #include <mujoco/mujoco.h>
+#include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -26,6 +29,7 @@
 #include <new>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "array_safety.h"
 #include "glfw_adapter.h"
@@ -169,6 +173,75 @@ void TorqueController(const mjModel* m, mjData* d) {
             sim_command.tau_ff;
 
   Eigen::Map<Eigen::VectorXd>(d->ctrl, m->nu) = tau_cmd;
+}
+
+struct ReplayStateApplyResult {
+  bool active = false;
+  bool changed = false;
+};
+
+Eigen::Quaterniond NormalizedOrIdentity(const Eigen::Quaterniond& quaternion) {
+  if (quaternion.norm() <= 0.0) {
+    return Eigen::Quaterniond::Identity();
+  }
+  return quaternion.normalized();
+}
+
+ReplayStateApplyResult ApplyLatestReplayState(const mjModel* m, mjData* d, uint64_t* last_sequence) {
+  ReplayStateApplyResult result;
+  if (!lcm_data_store) {
+    return result;
+  }
+
+  const uint64_t sequence = lcm_data_store->sim_replay_state_sequence.load(std::memory_order_acquire);
+  if (sequence == 0) {
+    return result;
+  }
+  result.active = true;
+  result.changed = sequence != *last_sequence;
+
+  const SimState replay_state = lcm_data_store->sim_replay_state();
+  if (replay_state.q.size() != m->nu || replay_state.qd.size() != m->nu) {
+    LOG_EVERY_N(ERROR, 100) << "Ignoring replay state with " << replay_state.q.size() << " q values and "
+                            << replay_state.qd.size() << " qd values, expected " << m->nu;
+    result.active = false;
+    return result;
+  }
+
+  const bool is_floating_base = (m->nv != m->nu);
+  if (is_floating_base) {
+    if (m->nq < kNumFloatingBaseJoints + m->nu || m->nv < kDofFloatingBase + m->nu) {
+      LOG_EVERY_N(ERROR, 100) << "Ignoring replay state because model nq/nv do not match floating-base layout";
+      result.active = false;
+      return result;
+    }
+
+    std::copy_n(replay_state.base_link_position.data(), replay_state.base_link_position.size(), d->qpos);
+    const Eigen::Quaterniond base_quaternion = NormalizedOrIdentity(replay_state.base_link_quaternion);
+    d->qpos[3] = base_quaternion.w();
+    d->qpos[4] = base_quaternion.x();
+    d->qpos[5] = base_quaternion.y();
+    d->qpos[6] = base_quaternion.z();
+    std::copy_n(replay_state.q.data(), m->nu, d->qpos + kNumFloatingBaseJoints);
+
+    std::copy_n(replay_state.base_link_linear_velocity.data(), replay_state.base_link_linear_velocity.size(), d->qvel);
+    std::copy_n(replay_state.base_link_angular_velocity.data(), replay_state.base_link_angular_velocity.size(),
+                d->qvel + 3);
+    std::copy_n(replay_state.qd.data(), m->nu, d->qvel + kDofFloatingBase);
+  } else {
+    if (m->nq < m->nu || m->nv < m->nu) {
+      LOG_EVERY_N(ERROR, 100) << "Ignoring replay state because model nq/nv do not match fixed-base layout";
+      result.active = false;
+      return result;
+    }
+    std::copy_n(replay_state.q.data(), m->nu, d->qpos);
+    std::copy_n(replay_state.qd.data(), m->nu, d->qvel);
+  }
+
+  std::fill_n(d->ctrl, m->nu, 0.0);
+  mj_forward(m, d);
+  *last_sequence = sequence;
+  return result;
 }
 
 namespace {
@@ -393,6 +466,7 @@ void PhysicsLoop(mj::Simulate& sim) {
   // cpu-sim syncronization point
   std::chrono::time_point<mj::Simulate::Clock> syncCPU;
   mjtNum syncSim = 0;
+  uint64_t last_replay_state_sequence = 0;
   common::Timer loop_timer;
   // run until asked to exit
   while (!sim.exitrequest.load()) {
@@ -460,8 +534,18 @@ void PhysicsLoop(mj::Simulate& sim) {
 
       // run only if model is present
       if (m) {
+        const ReplayStateApplyResult replay_state_apply =
+            ApplyLatestReplayState(m, d, &last_replay_state_sequence);
+        if (replay_state_apply.active) {
+          UpdateSimState(m, d);
+          sim.speed_changed = true;
+          if (replay_state_apply.changed) {
+            sim.AddToHistory();
+          }
+        }
+
         // running
-        if (sim.run) {
+        else if (sim.run) {
           bool stepped = false;
 
           // record cpu time at start of iteration
